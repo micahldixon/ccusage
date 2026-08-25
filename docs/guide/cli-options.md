@@ -21,6 +21,31 @@ ccusage monthly --since 20260101
 ccusage session --until 20260531
 ```
 
+Both bounds accept `YYYY-MM-DD` or `YYYYMMDD` and are inclusive. Any other spelling, or a value that is not a real calendar date such as `2026-02-30`, is rejected with a non-zero exit code instead of silently changing which rows the report keeps. The same check applies to `since` and `until` in a [configuration file](/guide/config-files).
+
+### Recent Periods
+
+Instead of working out dates, ask for the most recent periods of whatever the report groups by:
+
+```bash
+# Today
+ccusage daily --last 1
+
+# This week
+ccusage weekly --last 1
+
+# This month
+ccusage monthly --last 1
+
+# The last seven days, and the last three months
+ccusage daily --last 7
+ccusage monthly --last 3
+```
+
+The count is inclusive of the current period, so `--last 2` on a daily report covers yesterday and today. Weeks start on the same day the report buckets by, which is Monday everywhere except `ccusage claude weekly`, where `--start-of-week` decides.
+
+`--last` works on every daily, weekly, and monthly report, including the per-agent ones such as `ccusage codex daily --last 1`. It is not available on `session`, `blocks`, or `statusline`, which have no calendar period, and it cannot be combined with `--since`, `--until`, or `--sections`.
+
 ### Output Format
 
 Control how data is displayed:
@@ -128,6 +153,20 @@ ccusage monthly --config /path/to/team-config.json
 ```
 
 ## Command-Specific Options
+
+### Unified Report Options
+
+These options apply to `ccusage daily`, `ccusage weekly`, `ccusage monthly`, and `ccusage session` when they are aggregating all detected sources:
+
+```bash
+# Emit several JSON report sections from one source load
+ccusage daily --sections daily,monthly,session --json
+
+# Add per-agent breakdowns to daily, weekly, and monthly JSON rows
+ccusage daily --by-agent --json
+```
+
+`--sections` accepts a comma-separated list of `daily`, `weekly`, `monthly`, and `session`. The invoked report section is always included. For table output, each requested section is printed as a separate table. `--by-agent` is JSON-only; session rows are already per-agent.
 
 ### Daily Command
 

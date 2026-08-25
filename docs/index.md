@@ -52,19 +52,21 @@ features:
     details: Use pre-cached pricing data without network connectivity
 ---
 
+Project history (Japanese): [how ccusage began](https://ryoppippi.com/blog/2025-05-29-zenn-6c9a8fe6629cd6-ja/)
+
 <div style="text-align: center; margin: 2rem 0;">
   <h2 style="margin-bottom: 1rem;">Support ccusage</h2>
   <p style="margin-bottom: 1rem;">Sponsored by</p>
 
   <div style="display: flex; justify-content: center; margin-top: 1rem;">
     <div style="width: min(360px, 90vw); text-align: center;">
-      <a href="https://linkjolt.io/l/ryotaro-kimura-ryoppippi" target="_blank">
+      <a href="https://www.linkjolt.io/redirect?tc=ZRYGKVrY&aff=O8HjtyEN1hpQkXYlalZKT" target="_blank">
         <picture>
           <source media="(prefers-color-scheme: dark)" srcset="https://cdn.lineman.io/logo/lineman-dark.svg">
           <img src="https://cdn.lineman.io/logo/lineman-light.svg" alt="Lineman.io: Teams and Enterprise cost monitoring" style="display: block; width: min(320px, 80vw); height: auto; margin: 0 auto;">
         </picture>
       </a>
-      <p><a href="https://linkjolt.io/l/ryotaro-kimura-ryoppippi" target="_blank">Lineman.io — a Team & Enterprise solution for Claude Code:<br>40% lower token usage, full teams spend visibility, and unauthorized-spend alerts.</a></p>
+      <p><a href="https://www.linkjolt.io/redirect?tc=ZRYGKVrY&aff=O8HjtyEN1hpQkXYlalZKT" target="_blank">Lineman.io — a Team & Enterprise solution for Claude Code:<br>40% lower token usage, full teams spend visibility, and unauthorized-spend alerts.</a></p>
     </div>
   </div>
 

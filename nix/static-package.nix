@@ -6,8 +6,9 @@
 #     glibc-dynamic with a runpath into `/nix/store`, so it is fast for local
 #     work but NOT portable to end-user machines.
 #   * `ccusage-static` (this file) cross-compiles to musl and links fully
-#     statically, producing the portable binary that `release.yaml` ships to
-#     npm. The release matrix runs `nix build .#ccusage-static` for Linux;
+#     statically, producing the portable binary that the release jobs in
+#     `tagpr.yaml` ship to npm. The release matrix runs
+#     `nix build .#ccusage-static` for Linux;
 #     macOS arm64 uses the native Nix build, while macOS x64 and Windows fall
 #     back to `cargo build` because Nix cannot target those runners.
 #
@@ -66,7 +67,17 @@ in
             ];
             buildInputs = [ ];
           };
-          staticCargoArtifacts = staticCraneLib.buildDepsOnly staticDepsOnlyArgs;
+          staticDependencyArtifacts = staticCraneLib.buildDepsOnly staticDepsOnlyArgs;
+          staticWorkspaceArtifacts = import ./cargo-artifacts.nix {
+            inherit root;
+            craneLib = staticCraneLib;
+            inherit (pkgs) lib;
+            inherit pkgs;
+            commonArgs = staticCommonArgs;
+            cargoArtifacts = staticDependencyArtifacts;
+            cargoTargetArgs = "--target ${linuxStaticTarget}";
+          };
+          staticCargoArtifacts = staticWorkspaceArtifacts.adapters;
         in
         staticCraneLib.buildPackage (
           staticCommonArgs
@@ -78,6 +89,8 @@ in
             # GC-root-respecting trim drops it, forcing a full dependency rebuild.
             passthru = {
               cargoArtifacts = staticCargoArtifacts;
+              dependencyArtifacts = staticDependencyArtifacts;
+              workspaceArtifacts = staticWorkspaceArtifacts;
             };
             # A PT_INTERP header means the binary requests a dynamic loader,
             # so it would not run on end-user machines without the build-time

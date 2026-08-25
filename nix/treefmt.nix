@@ -20,13 +20,17 @@ in
       };
       rustToolchain = pkgs.rust-bin.fromRustupToolchainFile (root + /rust-toolchain.toml);
       craneLib = (inputs.crane.mkLib pkgs).overrideToolchain rustToolchain;
-      inherit (config.packages.ccusage.passthru) cargoArtifacts commonArgs;
+      inherit (config.packages.ccusage.passthru) commonArgs workspaceArtifacts;
+      # The generator only needs the config layer, so it starts from the foundation
+      # artifacts rather than the adapter ones: this derivation gates the CI
+      # preflight, and waiting for 15 adapters there would delay every build job.
+      cargoArtifacts = workspaceArtifacts.foundation;
       generateConfigSchema = craneLib.buildPackage (
         commonArgs
         // {
           pname = "generate-config-schema";
           inherit cargoArtifacts;
-          cargoExtraArgs = "-p ccusage --bin generate-config-schema";
+          cargoExtraArgs = "-p ccusage-config --bin generate-config-schema";
           doCheck = false;
           meta = {
             mainProgram = "generate-config-schema";
@@ -80,6 +84,31 @@ in
           };
         };
 
+        # The generated pricing snapshots carry upstream model ids verbatim, and
+        # some read as misspellings — one Gemini id ends in a clipped "no
+        # thinking". typos rewrites those to the word it expects, which silently
+        # stops the model from ever matching, and it rewrites them in this
+        # comment too if they are spelled out here. Only typos is excluded,
+        # because the JSON formatter is what keeps these files reviewable.
+        settings.formatter.typos.excludes = [
+          "rust/crates/ccusage-core/src/models-dev-pricing.json"
+          "rust/crates/ccusage-core/src/models-dev-catalog-rules.json"
+          "rust/adapters/codex/src/codex-auto-review-fallbacks.json"
+        ];
+
+        # The tagpr PR template is a Go text/template, and oxfmt's markdown
+        # rewrites break its <details> block and nested list structure.
+        #
+        # `bun.lock`/`bun.nix` under nix/tools are regenerated verbatim by `bun
+        # install` and `bun2nix`. Formatting them fights the generators: oxfmt
+        # rewrites the JSONC lockfile, and deadnix strips the unused arguments
+        # that bun.nix's `callPackage` signature requires.
+        settings.global.excludes = [
+          ".github/tagpr-template.md"
+          "nix/tools/*/bun.lock"
+          "nix/tools/*/bun.nix"
+        ];
+
         settings.formatter = {
           deadnix.priority = 1;
           statix.priority = 2;
@@ -97,6 +126,19 @@ in
               ''unknown permission scope "code-quality"''
               "-ignore"
               "shellcheck reported issue in this script: SC2016:info:"
+              # `background:` and `wait-all:` are new parallel-step keys added in
+              # GitHub Actions on 2026-06-25 that actionlint does not yet recognize.
+              # actionlint:ignore inline comments cannot suppress syntax-check errors
+              # (only expression-evaluation and job-dependency errors support that),
+              # so a global -ignore pattern is the only mechanism that works here.
+              # `-ignore` matches the message text only (not the file path), so the
+              # pattern cannot be narrowed to ci.yaml by prefixing the regex with a
+              # filename. The risk is bounded: any step genuinely missing run:/uses:
+              # would fail immediately at GitHub Actions runtime.
+              "-ignore"
+              ''unexpected key "background" for step''
+              "-ignore"
+              "step must run script with .run. section or run action with .uses. section"
             ];
             includes = [
               ".github/workflows/*.yaml"
@@ -132,6 +174,12 @@ in
               "--fix"
               "--config"
               "nix/oxlint-check.json"
+              # treefmt batches the files it matched and hands them over as
+              # arguments, so a batch can consist entirely of paths that
+              # oxlint-check.json ignores. oxlint treats "nothing left to lint"
+              # as an error, which surfaces as a formatter failure for a file
+              # that was deliberately excluded.
+              "--no-error-on-unmatched-pattern"
             ];
             includes = [
               "*.cjs"
@@ -148,8 +196,8 @@ in
             command = lib.getExe schemaGen;
             includes = [
               "apps/ccusage/config-schema.json"
-              "rust/crates/ccusage/src/config_schema.rs"
-              "rust/crates/ccusage/src/bin/generate_config_schema.rs"
+              "rust/crates/ccusage-config/src/config_schema.rs"
+              "rust/crates/ccusage-config/src/bin/generate_config_schema.rs"
             ];
             priority = 10;
           };

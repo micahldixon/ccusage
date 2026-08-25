@@ -44,14 +44,27 @@ Do not open a PR unless you have already been approved with `lgtm`.
 Before submitting a PR, run:
 
 ```bash
+just install
 just fmt
 just typecheck
 just test
 ```
 
+`just install` is only needed once per checkout (and after a lockfile change);
+`git wt` runs it for you when it creates a worktree.
+
 Use the canonical `ccusage` command in docs and tests. Standalone wrapper packages such as `ccusage-codex`, `ccusage-opencode`, `ccusage-amp`, and `ccusage-pi` have been removed and should not be reintroduced.
 
 Do not proactively create documentation files unless the change requires user-facing documentation.
+
+## Commit and PR Titles
+
+Commits and PR titles follow [Conventional Commits](https://www.conventionalcommits.org/). When a change
+belongs to one agent, the scope is that agent's directory name under `rust/adapters/` — `fix(kimi): ...`,
+`feat(codex): ...` — rather than a label invented for the occasion.
+
+A `commit-msg` hook checks this against your staged files, and CI checks the PR title, since a squash merge
+turns that title into the commit that lands on `main`.
 
 ## FAQ
 

@@ -1,6 +1,6 @@
 ---
 name: rust
-description: Guides ccusage Rust implementation work. Use when editing rust/crates, native packaging, parser/module layout, pricing embedding, or Rust/TypeScript parity.
+description: Guides ccusage Rust implementation work. Use when editing rust/crates or rust/adapters, adapter module layout, crate visibility and hawk findings, embedded pricing, or Rust behavior parity.
 paths:
   - 'rust/**/*.rs'
   - 'rust/**/*.toml'
@@ -10,64 +10,84 @@ globs: 'rust/**/*.rs,rust/**/*.toml,rust/**/build.rs'
 
 # ccusage Rust
 
-Use this skill for the native Rust CLI under `rust/crates/ccusage` and `rust/crates/ccusage-terminal`.
+The native Rust CLI is the production implementation. `rust/adapters/<agent>` holds
+one crate per usage source; `rust/crates` holds everything not tied to a single
+source.
 
-## Source Parity
+Read before editing:
 
-Rust is the production implementation. Preserve existing Rust behavior unless
-the user explicitly scopes a behavior change. Before implementing or refactoring
-an agent, inspect the current Rust adapter and the agent source reference docs:
+- `rust/adapters/README.md` and `rust/adapters/AGENTS.md` — adapter architecture,
+  the shared-vs-source boundary, module shape, and the checklist for adding an
+  agent. `rust/adapters/opencode/src/` is a compact worked example.
+- the crate's own `README.md` — what it owns and which Crane artifact layer it
+  builds in, which is what a change to it costs. Some adapters add a
+  `src/README.md` describing the source format.
 
-```sh
-fd . rust/crates/ccusage/src/adapter/<agent>
-sed -n '1,220p' rust/crates/ccusage/src/adapter/<agent>/README.md
-```
+Two boundaries the crate names hide: `ccusage-cli` holds the plain
+argument types while `ccusage-cli-parser` holds the parser, help renderer, and
+embedded help JSON that only the binary depends on; `rust/crates/ccusage` stays
+thin on purpose, holding dispatch plus the commands that are not an agent report.
+Behavior two adapters need moves into `ccusage-adapter-common`
+(`rust/adapters/common`) instead of becoming an adapter-to-adapter dependency.
 
-When porting behavior from the historical TypeScript implementation, first find
-the relevant commit or tag that still contains `apps/ccusage/src/adapter`, then
-compare against that source. Do not assume `origin/main` still contains the
-TypeScript adapter.
+For splitting large modules or hunting duplication, use the `reduce-similarities`
+skill.
 
-Preserve report semantics, JSON fields, table columns, progress/spinner text, agent grouping, date filtering, `--offline`, `CLAUDE_CONFIG_DIR`, and source-specific environment variables.
+## Behavior Parity
 
-## Module Layout
+Preserve existing Rust behavior unless the user explicitly scopes a behavior
+change: report semantics, JSON fields, table columns, progress and spinner text,
+agent grouping, date filtering, `--offline`, `CLAUDE_CONFIG_DIR`, and
+source-specific environment variables.
 
-Do not keep growing `main.rs` or single large adapter files. Use these
-responsibility boundaries where practical:
+`origin/main` no longer contains the TypeScript adapters. When porting historical
+behavior, compare against a commit that still has them
+(`git log -1 -- apps/ccusage/src/adapter`). Fix the comparison window — current
+main, a previous release, or that pinned commit — before changing behavior.
 
-- `adapter/<agent>/mod.rs` - public adapter surface and command wiring.
-- `adapter/<agent>/paths.rs` - environment variables, defaults, and path discovery.
-- `adapter/<agent>/parser.rs` - raw record parsing and token/model mapping.
-- `adapter/<agent>/loader.rs` - file walking, SQLite reads, dedupe, and date filtering entry points.
-- `adapter/<agent>/report.rs` - JSON/table row shaping when agent-specific.
-- shared modules stay in `types.rs`, `summary.rs`, `output.rs`, `pricing.rs`, `progress.rs`, and `date_utils.rs`.
+## Visibility
 
-Keep public `pub(crate)` surfaces narrow. Prefer moving tests with the code they exercise instead of leaving all Rust tests in `main.rs`.
+In this workspace `pub` is only for what another crate actually uses; everything
+else is `pub(crate)`, including items other modules in the same crate reach
+through a module chain.
 
-When splitting large Rust modules or removing duplication, use the `reduce-similarities` skill, which runs `similarity-rs` for `.rs` files.
+`just hawk` reports the difference, and `nix flake check` gates on the same thing
+through `checks.<system>.ccusage-hawk`. When a finding looks wrong, check
+`rust/hawk.toml` for a missing shipped entry point before narrowing anything;
+adding `--fix` to the underlying `cargo hawk check` applies the narrowing.
+
+hawk only runs on the toolchain it was built against, so `rust-toolchain.toml` and
+`nix/cargo-hawk.nix` move together — that file's header explains the pinning and
+lists the hashes a version bump has to change.
+
+https://github.com/astral-sh/hawk
 
 ## Pricing Embedding
 
-TypeScript uses build/macro-time pricing snapshots. Rust should not rely on a manually edited `claude-pricing.json` as the only embedded source.
+Two snapshots ship inside the binary, both fed by pinned flake inputs and loaded
+by `rust/crates/ccusage-core/src/pricing.rs`;
+`rust/crates/ccusage-core/README.md` and its `build.rs` cover the build-time half.
 
-When changing pricing:
+LiteLLM is the primary table. It is compacted into `OUT_DIR` at build time and
+never committed: Nix builds and the dev shell hand `build.rs` the locked snapshot
+through `CCUSAGE_PRICING_JSON_PATH`, and the off-by-default
+`fetch-litellm-pricing` feature downloads it instead for plain `cargo build` on
+platforms Nix cannot target. Keep it off by default — its rustls stack is the most
+expensive build-dependency in the workspace. `just update-litellm-pricing`
+re-locks the input and validates.
 
-- Use the `litellm` flake input as the canonical pinned pricing revision for
-  embedded pricing.
-- For Nix builds, pass the locked LiteLLM `model_prices_and_context_window.json`
-  to `build.rs` through `CCUSAGE_PRICING_JSON_PATH`.
-- For non-Nix Cargo builds, have `build.rs` read the same `litellm` revision from
-  `flake.lock` and fetch that pinned raw JSON at build time.
-- Do not check generated LiteLLM pricing snapshots into the repository.
-- Keep pricing JSON filtering and compacting in `build.rs` so runtime code loads
-  the generated build-time snapshot first, then built-in model overrides, then
-  runtime fetch when not `--offline`.
-- Add tests for embedded/offline pricing and context limits.
+models.dev is the committed offline fallback:
+`rust/crates/ccusage-core/src/models-dev-pricing.json` and
+`rust/adapters/codex/src/codex-auto-review-fallbacks.json`, both regenerated by
+`just gen-models-dev-pricing` (`just update-models-dev-pricing` bumps the pinned
+input first). `rust/crates/ccusage-core/src/fast-multiplier-overrides.json` sits
+beside them but is hand-maintained.
+
+Filtering and compacting belong in `build.rs`, so runtime code loads the generated
+build-time snapshot first, then built-in model overrides, then a runtime fetch when
+not `--offline`. Cover embedded/offline pricing and context limits with tests.
 
 ## Validation
 
-Use the `testing` skill for Rust test commands. Use
-`profile` for performance work and branch-vs-main comparisons. For
-parity work, compare against the current main branch, a previous release, or a
-pinned historical TypeScript commit for a stable fixture window before changing
-behavior.
+Test commands live in the `testing` skill; performance work and branch-vs-main
+comparisons in `profile`; repo-wide format and check recipes in `development`.

@@ -1,128 +1,29 @@
-use std::{fmt, io};
-
 mod adapter;
 mod blocks;
 mod cli;
 mod commands;
-mod config;
-mod config_schema;
-mod cost;
-mod date_utils;
-mod fast;
-mod home;
-mod logger;
-mod model_aliases;
-mod output;
-mod pricing;
-mod progress;
-mod project_names;
-mod summary;
-mod types;
-mod utils;
+mod http;
 
-pub(crate) use adapter::claude::{
-    chunk_file_indexes_by_size, collect_files_with_extension, collect_usage_files,
-    filter_loaded_entries_by_date, load_daily_summaries, load_entries,
-};
-pub(crate) use adapter::read_files_parallel;
+pub(crate) use adapter::claude::{load_daily_summaries, load_entries};
+#[cfg(test)]
+pub(crate) use adapter::codex::CodexTokenUsageEvent;
 pub(crate) use blocks::{
     block_json, calculate_burn_rate, filter_blocks_by_date, format_remaining_time,
     identify_session_blocks, print_active_block_detail, print_blocks_table, sort_blocks,
 };
-pub(crate) use cost::{
-    calculate_cost, calculate_cost_for_usage, missing_pricing_model_for_candidates,
-    missing_pricing_model_for_token_total, missing_pricing_model_for_usage,
-};
-pub(crate) use date_utils::*;
-pub(crate) use logger::{debug_log, log_level};
-pub(crate) use output::{
-    format_currency, format_models_multiline, format_number, group_project_output, json_float,
-    print_json_or_jq, print_missing_pricing_warnings, print_missing_pricing_warnings_for_models,
-    print_usage_table, session_summary_json, should_use_compact_layout, summary_json, totals_json,
-    wants_json,
-};
-pub(crate) use project_names::{format_project_name, parse_project_aliases, short_model_name};
-pub(crate) use summary::{
-    BucketKind, SessionAccumulator, filter_and_sort_summaries, sort_summaries, summarize_by_key,
-    summarize_summaries_by_bucket, week_start,
-};
-pub(crate) use types::*;
-pub(crate) use utils::{
-    apply_total_token_fallback, json_value_u64, non_empty_json_string, total_usage_tokens,
-};
-
-pub(crate) use ccusage_terminal::{Align, Color, SimpleTable};
-use ccusage_terminal::{TerminalStyle, terminal_width};
+#[cfg(test)]
+pub(crate) use ccusage_adapter_common::chunk_file_indexes_by_size;
+pub(crate) use ccusage_core::*;
 use cli::{AgentCommandArgs, AgentReportKind, Command};
+#[cfg(test)]
 use pricing::PricingMap;
 
 #[cfg(all(target_os = "linux", target_env = "musl"))]
 #[global_allocator]
 static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-const DEFAULT_SESSION_DURATION_HOURS: f64 = 5.0;
-const DEFAULT_RECENT_DAYS: i64 = 3;
-const BLOCKS_WARNING_THRESHOLD: f64 = 0.8;
-const USAGE_COMPACT_WIDTH_THRESHOLD: usize = 100;
-const BLOCKS_COMPACT_WIDTH_THRESHOLD: usize = 120;
-
-type Result<T> = std::result::Result<T, CliError>;
-
-#[derive(Debug)]
-struct CliError(String);
-
-impl fmt::Display for CliError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl From<io::Error> for CliError {
-    fn from(error: io::Error) -> Self {
-        Self(error.to_string())
-    }
-}
-
-impl From<serde_json::Error> for CliError {
-    fn from(error: serde_json::Error) -> Self {
-        Self(error.to_string())
-    }
-}
-
-fn cli_error(message: impl Into<String>) -> CliError {
-    CliError(message.into())
-}
-
-fn terminal_style(shared: &cli::SharedArgs) -> TerminalStyle {
-    TerminalStyle {
-        color: shared.color,
-        log_level: log_level(),
-        no_color: shared.no_color,
-    }
-}
-
-fn color(shared: &cli::SharedArgs, value: impl AsRef<str>, color: Color) -> String {
-    ccusage_terminal::color(terminal_style(shared), value, color)
-}
-
-fn print_box_title(title: &str, shared: &cli::SharedArgs) {
-    ccusage_terminal::print_box_title(title, terminal_style(shared));
-}
-
-trait Context<T> {
-    fn context(self, message: impl Into<String>) -> Result<T>;
-}
-
-impl<T, E> Context<T> for std::result::Result<T, E>
-where
-    E: fmt::Display,
-{
-    fn context(self, message: impl Into<String>) -> Result<T> {
-        self.map_err(|error| cli_error(format!("{}: {error}", message.into())))
-    }
-}
-
 fn main() -> Result<()> {
+    pricing::set_json_fetcher(http::fetch_json);
     let cli = cli::parse();
     match cli.command {
         Some(Command::All(args)) => adapter::all::run(args),
@@ -146,10 +47,13 @@ fn main() -> Result<()> {
         Some(Command::Gemini(args)) => adapter::gemini::run(args),
         Some(Command::Kimi(args)) => adapter::kimi::run(args),
         Some(Command::OpenClaw(args)) => adapter::openclaw::run(args),
+        Some(Command::Grok(args)) => adapter::grok::run(args),
         None => {
             let args = AgentCommandArgs {
                 shared: cli.shared,
                 kind: AgentReportKind::Daily,
+                sections: None,
+                by_agent: false,
                 pi_path: None,
                 open_claw_path: None,
                 codex_speed: cli::CodexSpeed::Auto,
@@ -173,13 +77,68 @@ mod tests {
     };
 
     #[test]
+    fn shared_usage_types_are_exposed_by_core_crate() {
+        assert_eq!(
+            std::any::type_name::<ccusage_core::TokenUsageRaw>(),
+            std::any::type_name::<TokenUsageRaw>()
+        );
+    }
+
+    #[test]
+    fn agent_commands_are_exposed_by_independent_crates() {
+        let runs: [fn(AgentCommandArgs) -> Result<()>; 15] = [
+            ccusage_adapter_amp::run,
+            ccusage_adapter_codebuff::run,
+            ccusage_adapter_codex::run,
+            ccusage_adapter_copilot::run,
+            ccusage_adapter_droid::run,
+            ccusage_adapter_gemini::run,
+            ccusage_adapter_goose::run,
+            ccusage_adapter_grok::run,
+            ccusage_adapter_hermes::run,
+            ccusage_adapter_kilo::run,
+            ccusage_adapter_kimi::run,
+            ccusage_adapter_openclaw::run,
+            ccusage_adapter_opencode::run,
+            ccusage_adapter_pi::run,
+            ccusage_adapter_qwen::run,
+        ];
+
+        assert_eq!(runs.len(), 15);
+    }
+
+    #[test]
+    fn unified_command_is_exposed_by_independent_crate() {
+        let run: fn(AgentCommandArgs) -> Result<()> = ccusage_adapter_all::run;
+
+        assert_eq!(
+            std::mem::size_of_val(&run),
+            std::mem::size_of::<fn(AgentCommandArgs) -> Result<()>>()
+        );
+    }
+
+    #[test]
+    fn compiled_version_matches_release_package() {
+        let package =
+            serde_json::from_str::<serde_json::Value>(include_str!("../../../../package.json"))
+                .unwrap();
+
+        assert_eq!(
+            env!("CCUSAGE_VERSION"),
+            package["version"].as_str().unwrap()
+        );
+    }
+
+    #[test]
     fn formats_numbers_with_commas() {
         assert_eq!(format_number(1_234_567), "1,234,567");
     }
 
     #[test]
     fn calculates_tiered_cost() {
-        assert!((tiered_cost(300_000, 3e-6, Some(6e-6)) - 1.2).abs() < f64::EPSILON);
+        assert!((tiered_cost(300_000, 3e-6, Some(6e-6), 200_000) - 1.2).abs() < f64::EPSILON);
+        // A larger threshold keeps more tokens at the base rate.
+        assert!((tiered_cost(300_000, 5e-6, Some(10e-6), 272_000) - 1.64).abs() < 1e-9);
     }
 
     #[test]
@@ -355,6 +314,57 @@ mod tests {
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].project.as_ref(), "project1");
+    }
+
+    #[test]
+    fn loads_advisor_usage_as_a_separate_model_entry() {
+        let fixture = fs_fixture!({
+            "projects/project1/session1/chat.jsonl": r#"{"timestamp":"2026-05-22T02:34:40.000Z","version":"1.2.3","sessionId":"session1","advisorModel":"claude-opus-4-20250514","message":{"id":"msg_123","model":"claude-sonnet-4-20250514","usage":{"input_tokens":2,"output_tokens":491,"cache_creation_input_tokens":7853,"cache_read_input_tokens":226584,"iterations":[{"type":"message","input_tokens":1,"output_tokens":45,"cache_creation_input_tokens":7192,"cache_read_input_tokens":109696},{"type":"advisor_message","model":"claude-opus-4-20250514","input_tokens":159419,"output_tokens":7805,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},{"type":"message","input_tokens":1,"output_tokens":446,"cache_creation_input_tokens":661,"cache_read_input_tokens":116888}]}},"requestId":"req_456","costUSD":1.23}"#,
+        });
+
+        let _env = EnvVarGuard::set("CLAUDE_CONFIG_DIR", fixture.root());
+        let shared = SharedArgs {
+            mode: CostMode::Display,
+            ..SharedArgs::default()
+        };
+        let entries = load_entries(&shared, None).unwrap();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(
+            entries[0].model.as_deref(),
+            Some("claude-sonnet-4-20250514")
+        );
+        assert_eq!(entries[0].data.message.usage.input_tokens, 2);
+        assert_eq!(entries[0].data.message.usage.output_tokens, 491);
+        assert_eq!(entries[1].model.as_deref(), Some("claude-opus-4-20250514"));
+        assert_eq!(entries[1].data.message.usage.input_tokens, 159_419);
+        assert_eq!(entries[1].data.message.usage.output_tokens, 7_805);
+    }
+
+    #[test]
+    fn includes_advisor_usage_in_daily_summaries() {
+        let fixture = fs_fixture!({
+            "projects/project1/session1/chat.jsonl": r#"{"timestamp":"2026-05-22T02:34:40.000Z","version":"1.2.3","sessionId":"session1","advisorModel":"claude-opus-4-20250514","message":{"id":"msg_123","model":"claude-sonnet-4-20250514","usage":{"input_tokens":2,"output_tokens":491,"cache_creation_input_tokens":7853,"cache_read_input_tokens":226584,"iterations":[{"type":"message","input_tokens":1,"output_tokens":45,"cache_creation_input_tokens":7192,"cache_read_input_tokens":109696},{"type":"advisor_message","model":"claude-opus-4-20250514","input_tokens":159419,"output_tokens":7805,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},{"type":"message","input_tokens":1,"output_tokens":446,"cache_creation_input_tokens":661,"cache_read_input_tokens":116888}]}},"requestId":"req_456","costUSD":1.23}"#,
+        });
+
+        let _env = EnvVarGuard::set("CLAUDE_CONFIG_DIR", fixture.root());
+        let shared = SharedArgs {
+            mode: CostMode::Display,
+            timezone: Some("UTC".to_string()),
+            ..SharedArgs::default()
+        };
+        let daily = load_daily_summaries(&shared, None, false).unwrap();
+
+        assert_eq!(daily.len(), 1);
+        assert_eq!(daily[0].input_tokens, 159_421);
+        assert_eq!(daily[0].output_tokens, 8_296);
+        assert_eq!(
+            daily[0].models_used,
+            vec![
+                "claude-sonnet-4-20250514".to_string(),
+                "claude-opus-4-20250514".to_string(),
+            ]
+        );
     }
 
     #[test]
@@ -537,6 +547,7 @@ mod tests {
             reasoning_output_tokens: 0,
             total_tokens: 150,
             is_fallback_model: false,
+            service_tier: None,
         }];
 
         let report = adapter::codex::report_json(
@@ -578,6 +589,7 @@ mod tests {
             reasoning_output_tokens: 3,
             total_tokens: 131,
             is_fallback_model: false,
+            service_tier: None,
         }];
 
         let report = adapter::codex::report_json(
@@ -615,6 +627,7 @@ mod tests {
             reasoning_output_tokens: 0,
             total_tokens: 15,
             is_fallback_model: false,
+            service_tier: None,
         }];
 
         let standard = adapter::codex::report_json(
@@ -651,6 +664,7 @@ mod tests {
             reasoning_output_tokens: 0,
             total_tokens: 110,
             is_fallback_model: false,
+            service_tier: None,
         }];
 
         let standard = adapter::codex::report_json(
@@ -767,13 +781,13 @@ mod tests {
             .join("\n"),
         });
 
-        let entries = adapter::pi::read_session_file(
-            &fixture.path("sessions/project-a/prefix_session-a.jsonl"),
-            parse_tz(Some("UTC")).as_ref(),
-            CostMode::Display,
-            None,
-        )
-        .unwrap();
+        let shared = SharedArgs {
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Display,
+            ..SharedArgs::default()
+        };
+        let sessions_path = fixture.path("sessions");
+        let entries = adapter::pi::load_entries(&shared, sessions_path.to_str(), None).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].date, "2026-04-22");
@@ -839,6 +853,17 @@ mod tests {
         assert_eq!(report["daily"][0]["totalTokens"], 180);
         assert_eq!(report["daily"][0]["totalCost"], json!(0.05));
         assert_eq!(report["daily"][0]["modelsUsed"], json!(["[pi] gpt-5.4"]));
+        assert_eq!(
+            report["daily"][0]["modelBreakdowns"],
+            json!([{
+                "modelName": "[pi] gpt-5.4",
+                "inputTokens": 100,
+                "outputTokens": 50,
+                "cacheCreationTokens": 20,
+                "cacheReadTokens": 10,
+                "cost": 0.05
+            }])
+        );
     }
 
     #[test]

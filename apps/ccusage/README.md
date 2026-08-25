@@ -27,14 +27,14 @@
 
 <div align="center">
 
-<a href="https://linkjolt.io/l/ryotaro-kimura-ryoppippi">
+<a href="https://www.linkjolt.io/redirect?tc=ZRYGKVrY&aff=O8HjtyEN1hpQkXYlalZKT">
     <picture>
         <source media="(prefers-color-scheme: dark)" srcset="https://cdn.lineman.io/logo/lineman-dark.svg">
         <img src="https://cdn.lineman.io/logo/lineman-light.svg" alt="Lineman.io: Teams and Enterprise cost monitoring" width="320">
     </picture>
 </a>
 
-<p align="center"><a href="https://linkjolt.io/l/ryotaro-kimura-ryoppippi">Lineman.io — a Team & Enterprise solution for Claude Code:<br />40% lower token usage, full teams spend visibility, and unauthorized-spend alerts.</a></p>
+<p align="center"><a href="https://www.linkjolt.io/redirect?tc=ZRYGKVrY&aff=O8HjtyEN1hpQkXYlalZKT">Lineman.io — a Team & Enterprise solution for Claude Code:<br />40% lower token usage, full teams spend visibility, and unauthorized-spend alerts.</a></p>
 
 </div>
 
@@ -78,6 +78,7 @@ ccusage reads local usage data from coding agent CLIs and turns it into daily, w
 | Qwen               | `ccusage qwen daily`     |
 | GitHub Copilot CLI | `ccusage copilot daily`  |
 | Gemini CLI         | `ccusage gemini daily`   |
+| Grok Build CLI     | `ccusage grok daily`     |
 
 Use `ccusage daily`, `ccusage weekly`, `ccusage monthly`, or `ccusage session` to include every detected source in one report.
 
@@ -132,14 +133,20 @@ bunx ccusage kimi daily
 bunx ccusage qwen daily
 bunx ccusage copilot daily
 bunx ccusage gemini daily
+bunx ccusage grok daily
 bunx ccusage pi daily --pi-path /path/to/sessions
 bunx ccusage pi daily --pi-path /path/to/sessions,/archive/pi/sessions
 
 # Explicit unified report
 bunx ccusage daily --all
+bunx ccusage daily --sections daily,monthly,session --json
+bunx ccusage daily --by-agent --json
 
 # Filters and options
 bunx ccusage daily --since 2026-04-25 --until 2026-05-16
+bunx ccusage daily --last 1  # Today
+bunx ccusage weekly --last 1  # This week
+bunx ccusage monthly --last 1  # This month
 bunx ccusage daily --json  # JSON output
 bunx ccusage daily --no-cost  # Hide cost columns and JSON cost fields
 bunx ccusage daily --timezone UTC  # Use UTC timezone
@@ -159,12 +166,13 @@ bunx ccusage monthly --compact  # Compact monthly report
 - 📊 **Daily Report**: View token usage and costs aggregated by date
 - 📅 **Monthly Report**: View token usage and costs aggregated by month
 - 💬 **Session Report**: View usage grouped by conversation sessions
-- 🤖 **Unified CLI Reports**: View Claude Code, Codex, OpenCode, Amp, Droid, Codebuff, Hermes Agent, pi-agent, Goose, OpenClaw, Kilo, Kimi, Qwen, GitHub Copilot CLI, and Gemini CLI usage from one CLI
+- 🤖 **Unified CLI Reports**: View Claude Code, Codex, OpenCode, Amp, Droid, Codebuff, Hermes Agent, pi-agent, Goose, OpenClaw, Kilo, Kimi, Qwen, GitHub Copilot CLI, Gemini CLI, and Grok Build CLI usage from one CLI
 - ⏰ **5-Hour Blocks Report**: Track usage within Claude's billing windows with active block monitoring
 - 🚀 **Statusline Integration**: Compact usage display for Claude Code status bar hooks (Beta)
 - 🤖 **Model Tracking**: See which models are used across supported sources
 - 📊 **Model Breakdown**: View per-model cost breakdown with `--breakdown` flag
 - 📅 **Date Filtering**: Filter reports by date range using `--since` and `--until`
+- ⏱️ **Recent Periods**: Jump to today, this week, or this month with `--last 1` on any daily, weekly, or monthly report
 - 📁 **Custom Paths**: Support for custom local data directory locations
 - 🎨 **Beautiful Output**: Colorful table-formatted display with automatic responsive layout
 - 📱 **Smart Tables**: Automatic compact mode for narrow terminals (< 100 characters) with essential columns
@@ -183,6 +191,8 @@ bunx ccusage monthly --compact  # Compact monthly report
 ## Documentation
 
 Full documentation is available at **[ccusage.com](https://ccusage.com/)**
+
+Further reading (Japanese): [how ccusage began](https://ryoppippi.com/blog/2025-05-29-zenn-6c9a8fe6629cd6-ja/)
 
 ## Development
 
@@ -242,12 +252,12 @@ The scheduled `update pricing` workflow runs the same update and validation, the
 
 ## Star History
 
-<a href="https://www.star-history.com/#ccusage/ccusage&Date">
-    <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ccusage/ccusage&type=Date&theme=dark" />
-        <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=ccusage/ccusage&type=Date" />
-        <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=ccusage/ccusage&type=Date" />
-    </picture>
+<a href="https://www.star-history.com/?repos=ccusage%2Fccusage&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=ccusage/ccusage&type=date&theme=dark&legend=top-left&sealed_token=bC4-7Zs63nsOam9kdlCTUCbyCn7QuItb4yy4h8Ot0SrOeDlb5y2saMUc1CAOskhB1fl3RSZZuUmFyjAOICGnniL5wqbvTmHrbqqiIH5mpn8spRFPfjLK_w" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=ccusage/ccusage&type=date&legend=top-left&sealed_token=bC4-7Zs63nsOam9kdlCTUCbyCn7QuItb4yy4h8Ot0SrOeDlb5y2saMUc1CAOskhB1fl3RSZZuUmFyjAOICGnniL5wqbvTmHrbqqiIH5mpn8spRFPfjLK_w" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=ccusage/ccusage&type=date&legend=top-left&sealed_token=bC4-7Zs63nsOam9kdlCTUCbyCn7QuItb4yy4h8Ot0SrOeDlb5y2saMUc1CAOskhB1fl3RSZZuUmFyjAOICGnniL5wqbvTmHrbqqiIH5mpn8spRFPfjLK_w" />
+ </picture>
 </a>
 
 ## License

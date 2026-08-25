@@ -1,82 +1,105 @@
-#!/usr/bin/env bun
+#!/usr/bin/env nix
+/*
+#! nix shell --inputs-from ../../.. nixpkgs#bun -c bun
+*/
+import { dirname, join, resolve } from 'node:path';
 
-import path, { join, resolve } from 'node:path';
-import process from 'node:process';
-import { cli, define } from 'gunshi';
-
-const DEFAULT_SIZE_MIB = 1024;
-export const DEFAULT_CODEX_SIZE_MIB = 1024;
+const MIB = 1024 * 1024;
 const CHUNK_LINE_COUNT = 128;
-const FLUSH_INTERVAL_BYTES = 64 * 1024 * 1024;
-const PADDING_SOURCE = 'x'.repeat(128 * 1024);
+const REAL_WORLD_PROFILE_FILES = 3142;
+const REAL_WORLD_PROFILE_TOTAL_MIB = 1238.9718046188354;
+const REAL_WORLD_QUANTILES = [
+	{ percentile: 0, size: 236 },
+	{ percentile: 0.5, size: 105_267 },
+	{ percentile: 0.75, size: 233_572 },
+	{ percentile: 0.9, size: 653_972 },
+	{ percentile: 0.95, size: 1_504_757 },
+	{ percentile: 0.99, size: 5_383_751 },
+	{ percentile: 1, size: 87_033_471 },
+] as const;
 
-/**
- * Aggregate-only profile from a local large Claude corpus.
- *
- * No JSONL contents, prompts, paths, or model outputs are stored here. The source corpus had
- * 3,142 JSONL files, 1,238.97 MiB total, 403,203 rows, and about 3.2 KiB per row on average. File
- * sizes were heavily skewed: p50 105 KiB, p75 234 KiB, p90 654 KiB, p95 1.5 MiB, p99 5.4 MiB,
- * max 87 MiB. The generator scales only those aggregate distribution points to the requested
- * target size so CI exercises a realistic multi-file workload instead of one huge file.
- */
-const REAL_WORLD_PROFILE = {
-	files: 3142,
-	totalMiB: 1238.9718046188354,
-	quantiles: [
-		{ p: 0, size: 236 },
-		{ p: 0.5, size: 105267 },
-		{ p: 0.75, size: 233572 },
-		{ p: 0.9, size: 653972 },
-		{ p: 0.95, size: 1504757 },
-		{ p: 0.99, size: 5383751 },
-		{ p: 1, size: 87033471 },
-	],
+type FixtureResult = {
+	fileCount: number;
+	lineCount: number;
+	totalBytes: number;
 };
 
-/**
- * Formats generated fixture size for CI logs.
- */
-function formatBytes(bytes: number): string {
-	return `${(bytes / 1024 / 1024).toFixed(2)} MiB`;
+type Options = {
+	outputDir: string;
+	codexOutputDir?: string;
+	sizeMib: number;
+	codexSizeMib: number;
+};
+
+function parsePositiveInteger(value: string, flagName: string): number {
+	const parsed = Number(value);
+	if (!Number.isSafeInteger(parsed) || parsed < 1) {
+		throw new Error(`${flagName} must be a positive integer`);
+	}
+	return parsed;
 }
 
-/**
- * Interpolates local aggregate file-size quantiles without storing any real Claude data.
- *
- * The CI fixture should behave like a real large Claude corpus: thousands of JSONL files, many
- * small sessions, and a long tail of larger sessions. A single 1 GiB file over-tests streaming,
- * while millions of tiny synthetic rows over-test per-line overhead.
- */
+function parseArguments(args: readonly string[]): Options {
+	const values = new Map<string, string>();
+	for (let index = 0; index < args.length; index += 1) {
+		const flag = args[index];
+		if (!flag?.startsWith('--')) {
+			throw new Error(`Unexpected argument: ${flag ?? ''}`);
+		}
+		const value = args[index + 1];
+		if (!value || value.startsWith('--')) {
+			throw new Error(`${flag} requires a value`);
+		}
+		if (!['--output-dir', '--codex-output-dir', '--size-mib', '--codex-size-mib'].includes(flag)) {
+			throw new Error(`Unknown option: ${flag}`);
+		}
+		values.set(flag, value);
+		index += 1;
+	}
+
+	const outputDir = values.get('--output-dir');
+	if (!outputDir) {
+		throw new Error('--output-dir is required');
+	}
+
+	return {
+		outputDir,
+		codexOutputDir: values.get('--codex-output-dir'),
+		sizeMib: parsePositiveInteger(values.get('--size-mib') ?? '1024', '--size-mib'),
+		codexSizeMib: parsePositiveInteger(
+			values.get('--codex-size-mib') ?? '1024',
+			'--codex-size-mib',
+		),
+	};
+}
+
+function formatBytes(bytes: number): string {
+	return `${(bytes / MIB).toFixed(2)} MiB`;
+}
+
 function interpolateFileSize(percentile: number): number {
-	for (let index = 1; index < REAL_WORLD_PROFILE.quantiles.length; index++) {
-		const previous = REAL_WORLD_PROFILE.quantiles[index - 1];
-		const current = REAL_WORLD_PROFILE.quantiles[index];
-		if (previous == null || current == null || percentile > current.p) {
+	for (let index = 1; index < REAL_WORLD_QUANTILES.length; index += 1) {
+		const previous = REAL_WORLD_QUANTILES[index - 1];
+		const current = REAL_WORLD_QUANTILES[index];
+		if (!previous || !current || percentile > current.percentile) {
 			continue;
 		}
-		const span = current.p - previous.p;
-		const ratio = span === 0 ? 0 : (percentile - previous.p) / span;
+		const ratio = (percentile - previous.percentile) / (current.percentile - previous.percentile);
 		return previous.size + (current.size - previous.size) * ratio;
 	}
-	return REAL_WORLD_PROFILE.quantiles.at(-1)?.size ?? 1024;
+	return REAL_WORLD_QUANTILES.at(-1)?.size ?? 0;
 }
 
-/**
- * Creates target file sizes by scaling the local aggregate distribution to the requested size.
- */
 function createFileSizeTargets(targetBytes: number): number[] {
 	const targetFileCount = Math.max(
 		1,
-		Math.round(
-			(targetBytes / 1024 / 1024 / REAL_WORLD_PROFILE.totalMiB) * REAL_WORLD_PROFILE.files,
-		),
+		Math.round((targetBytes / MIB / REAL_WORLD_PROFILE_TOTAL_MIB) * REAL_WORLD_PROFILE_FILES),
 	);
 	const rawSizes = Array.from({ length: targetFileCount }, (_, index) =>
 		interpolateFileSize((index + 0.5) / targetFileCount),
 	);
 	const rawTotal = rawSizes.reduce((total, size) => total + size, 0);
-	const scale = targetBytes / rawTotal;
-	return rawSizes.map((size) => Math.max(256, Math.round(size * scale)));
+	return rawSizes.map((size) => Math.max(256, Math.round(size * (targetBytes / rawTotal))));
 }
 
 function shuffledIndex(index: number, length: number): number {
@@ -90,259 +113,143 @@ function contentLength(index: number): number {
 	if (index % 37 === 0) {
 		return 8 * 1024 + (index % (8 * 1024));
 	}
-	return 1800 + (((index * 1103515245 + 12345) >>> 0) % 2400);
+	return 1800 + (((index * 1_103_515_245 + 12_345) % 4_294_967_296) % 2400);
 }
 
-function contentPadding(length: number): string {
-	return PADDING_SOURCE.slice(0, length);
+function paddedNumber(value: number, width: number): string {
+	return String(value).padStart(width, '0');
 }
 
-export function assertSafeDeletionTarget(directory: string, flagName: string): void {
-	const resolved = resolve(directory);
-	if (resolved === path.parse(resolved).root || resolved === process.cwd() || resolved.length < 5) {
-		throw new Error(`Refusing to delete unsafe ${flagName} path: ${resolved}`);
-	}
+function createClaudeUsageLine(index: number, fileIndex: number, sessionId: string): string {
+	const padding = 'x'.repeat(contentLength(index));
+	const payload = {
+		timestamp: `2026-01-${paddedNumber((index % 28) + 1, 2)}T${paddedNumber(index % 24, 2)}:${paddedNumber(Math.floor(index / 24) % 60, 2)}:00.000Z`,
+		cwd: `/tmp/ccusage-large-fixture/project-${paddedNumber(fileIndex % 128, 3)}`,
+		sessionId,
+		version: '1.0.0',
+		message: {
+			id: `msg_${index.toString(36).padStart(10, '0')}`,
+			model: index % 5 === 0 ? 'claude-opus-4-20250514' : 'claude-sonnet-4-20250514',
+			content: [{ type: 'text', text: padding }],
+			usage: {
+				input_tokens: 100 + (index % 1000),
+				output_tokens: 20 + (index % 200),
+				cache_creation_input_tokens: index % 300,
+				cache_read_input_tokens: index % 5000,
+				...(index % 7 === 0 ? { speed: 'fast' } : {}),
+			},
+		},
+		requestId: `req_${index.toString(36).padStart(10, '0')}`,
+	};
+	return `${JSON.stringify(payload)}\n`;
 }
 
-/**
- * Creates one deterministic usage row that stays on ccusage's normal fast parser path.
- *
- * Every row has a unique message/request id so deduplication cannot collapse the synthetic
- * workload. The padded content keeps row density close to local real-world aggregate stats without
- * copying any user data into CI.
- */
-function createUsageLine(index: number, fileIndex: number, sessionId: string): string {
-	const day = (index % 28) + 1;
-	const hour = index % 24;
-	const minute = Math.floor(index / 24) % 60;
-	const timestamp = `2026-01-${day.toString().padStart(2, '0')}T${hour
-		.toString()
-		.padStart(2, '0')}:${minute.toString().padStart(2, '0')}:00.000Z`;
-	const suffix = index.toString(36).padStart(10, '0');
-	const model = index % 5 === 0 ? 'claude-opus-4-20250514' : 'claude-sonnet-4-20250514';
-	const speed = index % 7 === 0 ? `,"speed":"fast"` : '';
-	const projectName = `project-${(fileIndex % 128).toString().padStart(3, '0')}`;
-	const padding = contentPadding(contentLength(index));
-
-	return `{"timestamp":"${timestamp}","cwd":"/tmp/ccusage-large-fixture/${projectName}","sessionId":"${sessionId}","version":"1.0.0","message":{"id":"msg_${suffix}","model":"${model}","content":[{"type":"text","text":"${padding}"}],"usage":{"input_tokens":${100 + (index % 1000)},"output_tokens":${20 + (index % 200)},"cache_creation_input_tokens":${index % 300},"cache_read_input_tokens":${index % 5000}${speed}}},"requestId":"req_${suffix}"}\n`;
-}
-
-export function createCodexUsageLine(index: number, fileIndex: number): string {
-	const day = (index % 28) + 1;
-	const hour = index % 24;
-	const minute = Math.floor(index / 24) % 60;
-	const timestamp = `2026-01-${day.toString().padStart(2, '0')}T${hour
-		.toString()
-		.padStart(2, '0')}:${minute.toString().padStart(2, '0')}:00.000Z`;
-	const model = index % 5 === 0 ? 'gpt-5.3-codex' : 'gpt-5.2-codex';
+function createCodexUsageLine(index: number, fileIndex: number): string {
 	const inputTokens = 200 + (index % 2000);
-	const cachedInputTokens = index % 1200;
 	const outputTokens = 40 + (index % 600);
 	const reasoningOutputTokens = index % 300;
 	const totalTokens = inputTokens + outputTokens + reasoningOutputTokens;
-	const padding = contentPadding(contentLength(index + fileIndex));
-
-	return `{"timestamp":"${timestamp}","type":"event_msg","payload":{"type":"token_count","info":{"model":"${model}","last_token_usage":{"input_tokens":${inputTokens},"cached_input_tokens":${cachedInputTokens},"output_tokens":${outputTokens},"reasoning_output_tokens":${reasoningOutputTokens},"total_tokens":${totalTokens}},"total_token_usage":{"input_tokens":${inputTokens},"cached_input_tokens":${cachedInputTokens},"output_tokens":${outputTokens},"reasoning_output_tokens":${reasoningOutputTokens},"total_tokens":${totalTokens}}},"content":"${padding}"}}\n`;
+	const usage = {
+		input_tokens: inputTokens,
+		cached_input_tokens: index % 1200,
+		output_tokens: outputTokens,
+		reasoning_output_tokens: reasoningOutputTokens,
+		total_tokens: totalTokens,
+	};
+	return `${JSON.stringify({
+		timestamp: `2026-01-${paddedNumber((index % 28) + 1, 2)}T${paddedNumber(index % 24, 2)}:${paddedNumber(Math.floor(index / 24) % 60, 2)}:00.000Z`,
+		type: 'event_msg',
+		payload: {
+			type: 'token_count',
+			info: {
+				model: index % 5 === 0 ? 'gpt-5.3-codex' : 'gpt-5.2-codex',
+				last_token_usage: usage,
+				total_token_usage: usage,
+			},
+			content: 'x'.repeat(contentLength(index + fileIndex)),
+		},
+	})}\n`;
 }
 
-async function generateClaudeFixture(
+function assertSafeDeletionTarget(directory: string, flagName: string): string {
+	const resolved = resolve(directory);
+	if (resolved === resolve('/') || resolved === resolve('.') || resolved.length < 5) {
+		throw new Error(`Refusing to delete unsafe ${flagName} path: ${resolved}`);
+	}
+	return resolved;
+}
+
+async function generateFixture(
 	outputDir: string,
 	sizeMib: number,
-): Promise<{ fileCount: number; lineCount: number; totalBytes: number }> {
-	assertSafeDeletionTarget(outputDir, '--output-dir');
-	const targetBytes = sizeMib * 1024 * 1024;
-	const fileSizeTargets = createFileSizeTargets(targetBytes);
-
-	await Bun.$`rm -rf ${outputDir}`;
+	format: 'claude' | 'codex',
+): Promise<FixtureResult> {
+	const directory = assertSafeDeletionTarget(
+		outputDir,
+		format === 'claude' ? '--output-dir' : '--codex-output-dir',
+	);
+	const fileSizeTargets = createFileSizeTargets(sizeMib * MIB);
+	await Bun.$`rm -rf ${directory}`;
 
 	let totalBytes = 0;
 	let lineIndex = 0;
-	let fileCount = 0;
-	const createdProjectDirs = new Set<string>();
-
-	for (let fileIndex = 0; fileIndex < fileSizeTargets.length; fileIndex++) {
-		const targetSize = fileSizeTargets[shuffledIndex(fileIndex, fileSizeTargets.length)] ?? 1024;
-		const projectDir = join(
-			outputDir,
-			'projects',
-			`project-${(fileIndex % 128).toString().padStart(3, '0')}`,
-		);
-		if (!createdProjectDirs.has(projectDir)) {
-			await Bun.$`mkdir -p ${projectDir}`;
-			createdProjectDirs.add(projectDir);
+	for (let fileIndex = 0; fileIndex < fileSizeTargets.length; fileIndex += 1) {
+		const targetSize = fileSizeTargets[shuffledIndex(fileIndex, fileSizeTargets.length)];
+		if (targetSize === undefined) {
+			throw new Error(`Missing file size target for index ${fileIndex}`);
 		}
-		const sessionId = `session-${fileIndex.toString().padStart(6, '0')}`;
-		const outputFile = join(projectDir, `${sessionId}.jsonl`);
-		const writer = Bun.file(outputFile).writer();
-		let fileBytes = 0;
-		let nextFlushAt = FLUSH_INTERVAL_BYTES;
+		const projectName = `project-${paddedNumber(fileIndex % 128, 3)}`;
+		const sessionId = `session-${paddedNumber(fileIndex, 6)}`;
+		const filePath =
+			format === 'claude'
+				? join(directory, 'projects', projectName, `${sessionId}.jsonl`)
+				: join(directory, 'sessions', projectName, `${sessionId}.jsonl`);
+		await Bun.$`mkdir -p ${dirname(filePath)}`;
 
+		const writer = Bun.file(filePath).writer();
+		let fileBytes = 0;
 		while (fileBytes < targetSize) {
 			let chunk = '';
 			for (
-				let index = 0;
-				index < CHUNK_LINE_COUNT && fileBytes + chunk.length < targetSize;
-				index++
+				let chunkIndex = 0;
+				chunkIndex < CHUNK_LINE_COUNT && fileBytes + Buffer.byteLength(chunk) < targetSize;
+				chunkIndex += 1
 			) {
-				chunk += createUsageLine(lineIndex++, fileIndex, sessionId);
+				chunk +=
+					format === 'claude'
+						? createClaudeUsageLine(lineIndex, fileIndex, sessionId)
+						: createCodexUsageLine(lineIndex, fileIndex);
+				lineIndex += 1;
 			}
-			writer.write(chunk);
-			fileBytes += chunk.length;
-			totalBytes += chunk.length;
-			if (fileBytes >= nextFlushAt) {
-				await writer.flush();
-				nextFlushAt += FLUSH_INTERVAL_BYTES;
-			}
+			const chunkBytes = Buffer.byteLength(chunk);
+			await writer.write(chunk);
+			fileBytes += chunkBytes;
+			totalBytes += chunkBytes;
 		}
 		await writer.end();
-		fileCount++;
 	}
 
-	return { fileCount, lineCount: lineIndex, totalBytes };
+	return { fileCount: fileSizeTargets.length, lineCount: lineIndex, totalBytes };
 }
 
-export async function generateCodexFixture(
-	outputDir: string,
-	sizeMib: number,
-): Promise<{ fileCount: number; lineCount: number; totalBytes: number }> {
-	assertSafeDeletionTarget(outputDir, '--codex-output-dir');
-	const targetBytes = sizeMib * 1024 * 1024;
-	const fileSizeTargets = createFileSizeTargets(targetBytes);
+function printResult(name: string, outputDir: string, result: FixtureResult): void {
+	console.log(`Generated ${name} fixture ${outputDir}`);
+	console.log(`Files: ${result.fileCount}`);
+	console.log(`Rows: ${result.lineCount}`);
+	console.log(`Size: ${formatBytes(result.totalBytes)}`);
+}
 
-	await Bun.$`rm -rf ${outputDir}`;
+async function main(): Promise<void> {
+	const options = parseArguments(process.argv.slice(2));
+	const outputDir = resolve(options.outputDir);
+	const claudeResult = await generateFixture(outputDir, options.sizeMib, 'claude');
+	printResult('Claude', outputDir, claudeResult);
 
-	let totalBytes = 0;
-	let lineIndex = 0;
-	let fileCount = 0;
-	const createdSessionDirs = new Set<string>();
-
-	for (let fileIndex = 0; fileIndex < fileSizeTargets.length; fileIndex++) {
-		const targetSize = fileSizeTargets[shuffledIndex(fileIndex, fileSizeTargets.length)] ?? 1024;
-		const sessionDir = join(
-			outputDir,
-			'sessions',
-			`project-${(fileIndex % 128).toString().padStart(3, '0')}`,
-		);
-		if (!createdSessionDirs.has(sessionDir)) {
-			await Bun.$`mkdir -p ${sessionDir}`;
-			createdSessionDirs.add(sessionDir);
-		}
-		const outputFile = join(sessionDir, `session-${fileIndex.toString().padStart(6, '0')}.jsonl`);
-		const writer = Bun.file(outputFile).writer();
-		let fileBytes = 0;
-		let nextFlushAt = FLUSH_INTERVAL_BYTES;
-
-		while (fileBytes < targetSize) {
-			let chunk = '';
-			for (
-				let index = 0;
-				index < CHUNK_LINE_COUNT && fileBytes + chunk.length < targetSize;
-				index++
-			) {
-				chunk += createCodexUsageLine(lineIndex++, fileIndex);
-			}
-			writer.write(chunk);
-			fileBytes += chunk.length;
-			totalBytes += chunk.length;
-			if (fileBytes >= nextFlushAt) {
-				await writer.flush();
-				nextFlushAt += FLUSH_INTERVAL_BYTES;
-			}
-		}
-		await writer.end();
-		fileCount++;
+	if (options.codexOutputDir) {
+		const codexOutputDir = resolve(options.codexOutputDir);
+		const codexResult = await generateFixture(codexOutputDir, options.codexSizeMib, 'codex');
+		printResult('Codex', codexOutputDir, codexResult);
 	}
-
-	return { fileCount, lineCount: lineIndex, totalBytes };
 }
 
-if (import.meta.vitest != null) {
-	describe('createCodexUsageLine', () => {
-		it('creates synthetic Codex token_count JSONL rows that stay on the same fast parser path as real Codex session logs', () => {
-			const line = createCodexUsageLine(42, 7);
-
-			expect(line).toContain('"type":"event_msg"');
-			expect(line).toContain('"type":"token_count"');
-			expect(line).toContain('"last_token_usage"');
-			expect(line).toContain('"total_token_usage"');
-			expect(line).toContain('"model":"gpt-5.2-codex"');
-		});
-	});
-
-	describe('assertSafeDeletionTarget', () => {
-		it('refuses unsafe fixture deletion targets before the generator shells out to rm -rf', () => {
-			expect(() => assertSafeDeletionTarget('/', '--output-dir')).toThrow(
-				'Refusing to delete unsafe --output-dir path',
-			);
-			expect(() => assertSafeDeletionTarget(process.cwd(), '--output-dir')).toThrow(
-				'Refusing to delete unsafe --output-dir path',
-			);
-		});
-	});
-
-	describe('large fixture defaults', () => {
-		it('uses the same large fixture size for Codex and Claude by default', () => {
-			expect(DEFAULT_CODEX_SIZE_MIB).toBe(1024);
-		});
-	});
-}
-
-const command = define({
-	name: 'generate-large-fixture',
-	description: 'Generate synthetic JSONL fixtures for ccusage performance CI',
-	toKebab: true,
-	args: {
-		outputDir: {
-			type: 'string',
-			required: true,
-			description: 'Claude config directory to create',
-		},
-		codexOutputDir: {
-			type: 'string',
-			description: 'Codex home directory to create',
-		},
-		sizeMib: {
-			type: 'number',
-			default: DEFAULT_SIZE_MIB,
-			description: 'Target JSONL file size in MiB',
-		},
-		codexSizeMib: {
-			type: 'number',
-			default: DEFAULT_CODEX_SIZE_MIB,
-			description: 'Target Codex JSONL file size in MiB',
-		},
-	},
-	async run(ctx) {
-		if (!Number.isInteger(ctx.values.sizeMib) || ctx.values.sizeMib < 1) {
-			throw new Error('--size-mib must be a positive integer');
-		}
-		if (!Number.isInteger(ctx.values.codexSizeMib) || ctx.values.codexSizeMib < 1) {
-			throw new Error('--codex-size-mib must be a positive integer');
-		}
-
-		const outputDir = resolve(ctx.values.outputDir);
-		const claudeResult = await generateClaudeFixture(outputDir, ctx.values.sizeMib);
-
-		await Bun.write(
-			Bun.stdout,
-			`Generated Claude fixture ${outputDir}\nFiles: ${claudeResult.fileCount.toLocaleString('en-US')}\nRows: ${claudeResult.lineCount.toLocaleString('en-US')}\nSize: ${formatBytes(claudeResult.totalBytes)}\n`,
-		);
-
-		if (ctx.values.codexOutputDir != null) {
-			const codexOutputDir = resolve(ctx.values.codexOutputDir);
-			const codexResult = await generateCodexFixture(codexOutputDir, ctx.values.codexSizeMib);
-			await Bun.write(
-				Bun.stdout,
-				`Generated Codex fixture ${codexOutputDir}\nFiles: ${codexResult.fileCount.toLocaleString('en-US')}\nRows: ${codexResult.lineCount.toLocaleString('en-US')}\nSize: ${formatBytes(codexResult.totalBytes)}\n`,
-			);
-		}
-	},
-});
-
-if (import.meta.main) {
-	await cli(Bun.argv.slice(2), command, {
-		name: 'generate-large-fixture',
-		description: 'Generate synthetic JSONL fixtures for ccusage performance CI',
-		renderHeader: null,
-	});
-}
+await main();
