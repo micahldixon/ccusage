@@ -201,10 +201,12 @@ fn command_snapshot(command: Option<Command>) -> Value {
         Some(Command::Kilo(args)) => agent_command_snapshot("kilo", args),
         Some(Command::Copilot(args)) => agent_command_snapshot("copilot", args),
         Some(Command::Gemini(args)) => agent_command_snapshot("gemini", args),
+        Some(Command::Antigravity(args)) => agent_command_snapshot("antigravity", args),
         Some(Command::Kimi(args)) => agent_command_snapshot("kimi", args),
         Some(Command::Qwen(args)) => agent_command_snapshot("qwen", args),
         Some(Command::OpenClaw(args)) => agent_command_snapshot("openclaw", args),
         Some(Command::Grok(args)) => agent_command_snapshot("grok", args),
+        Some(Command::ZCode(args)) => agent_command_snapshot("zcode", args),
     }
 }
 
@@ -240,6 +242,38 @@ fn commandless_invocation_preserves_default_dispatch() {
     let cli = parse(&["ccusage"]);
 
     assert!(cli.command.is_none());
+}
+
+#[test]
+fn rejects_date_bounds_that_are_not_real_calendar_dates() {
+    for value in [
+        "2026-02-30",
+        "2026-13-01",
+        "abc",
+        "2026/07/10",
+        "2026-07-10T00:00:00Z",
+    ] {
+        assert_eq!(
+            parse_error(&["ccusage", "daily", "--since", value]),
+            format!("Invalid value for --since '{value}'. Expected YYYY-MM-DD or YYYYMMDD.")
+        );
+        assert_eq!(
+            parse_error(&["ccusage", "daily", "--until", value]),
+            format!("Invalid value for --until '{value}'. Expected YYYY-MM-DD or YYYYMMDD.")
+        );
+    }
+}
+
+#[test]
+fn accepts_both_documented_date_bound_formats() {
+    for (value, normalized) in [("2026-07-10", "20260710"), ("20260710", "20260710")] {
+        let cli = parse(&["ccusage", "daily", "--since", value, "--until", value]);
+        let Some(Command::All(args)) = cli.command else {
+            panic!("expected all-agent command");
+        };
+        assert_eq!(args.shared.since.as_deref(), Some(normalized));
+        assert_eq!(args.shared.until.as_deref(), Some(normalized));
+    }
 }
 
 #[test]
@@ -615,7 +649,7 @@ fn root_help_lists_agent_namespaces_without_nested_commands() {
     let help = help_text();
     let agents = [
         "claude", "codex", "opencode", "amp", "droid", "codebuff", "hermes", "pi", "goose", "kilo",
-        "copilot", "gemini", "kimi", "qwen", "openclaw", "grok",
+        "copilot", "gemini", "kimi", "qwen", "openclaw", "grok", "zcode",
     ];
 
     for agent in agents {
@@ -832,6 +866,14 @@ fn snapshots_representative_cli_parse_shapes() {
             "cli": cli_snapshot(parse(&["ccusage", "grok", "daily", "--json"])),
         }),
         json!({
+            "case": "antigravity session",
+            "cli": cli_snapshot(parse(&["ccusage", "antigravity", "session", "--json"])),
+        }),
+        json!({
+            "case": "zcode daily",
+            "cli": cli_snapshot(parse(&["ccusage", "zcode", "daily", "--json"])),
+        }),
+        json!({
             "case": "blocks active recent",
             "cli": cli_snapshot(parse(&[
                 "ccusage",
@@ -1014,6 +1056,18 @@ fn parses_codex_speed_option() {
         panic!("expected codex command");
     };
     assert_eq!(args.codex_speed, CodexSpeed::Fast);
+}
+
+#[test]
+fn rejects_removed_codex_by_source_option() {
+    assert_eq!(
+        parse_error(&["ccusage", "codex", "daily", "--by-source"]),
+        "Unknown codex option '--by-source'"
+    );
+    assert_eq!(
+        parse_error(&["ccusage", "daily", "--by-source"]),
+        "Unknown option '--by-source'"
+    );
 }
 
 #[test]
@@ -1214,6 +1268,16 @@ fn parses_grok_daily_options() {
     let cli = parse(&["ccusage", "grok", "daily", "--json"]);
     let Some(Command::Grok(args)) = cli.command else {
         panic!("expected grok command");
+    };
+    assert_eq!(args.kind, AgentReportKind::Daily);
+    assert!(args.shared.json);
+}
+
+#[test]
+fn parses_zcode_daily_options() {
+    let cli = parse(&["ccusage", "zcode", "daily", "--json"]);
+    let Some(Command::ZCode(args)) = cli.command else {
+        panic!("expected zcode command");
     };
     assert_eq!(args.kind, AgentReportKind::Daily);
     assert!(args.shared.json);

@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::{
     LoadedEntry, PricingMap, Result, TimestampMs, TokenUsageRaw, UsageEntry, UsageMessage,
-    calculate_cost_for_usage, cli::CostMode, format_date_tz, format_rfc3339_millis,
+    calculate_cost_for_usage_at, cli::CostMode, format_date_tz, format_rfc3339_millis,
     missing_pricing_model_for_candidates, total_usage_tokens,
 };
 use ccusage_adapter_common::jsonl;
@@ -280,7 +280,14 @@ pub(super) fn parse_session_files(
             let display_model = raw_model.clone();
             let cost_usd = cost_usd_from_ticks(model_usage.cost_usd_ticks);
             // Cost bills full output_tokens only; reasoning is never added to billable output.
-            let cost = calculate_grok_cost(&raw_model, usage_raw, cost_usd, mode, pricing);
+            let cost = calculate_grok_cost_at(
+                &raw_model,
+                usage_raw,
+                cost_usd,
+                Some(timestamp_ms),
+                mode,
+                pricing,
+            );
             let missing_pricing_model =
                 missing_grok_pricing(&raw_model, usage_raw, cost_usd, mode, pricing);
             let timestamp_text = format_rfc3339_millis(timestamp_ms);
@@ -447,10 +454,22 @@ fn dedupe_key(
     )
 }
 
+#[cfg(test)]
 fn calculate_grok_cost(
     raw_model: &str,
     usage: TokenUsageRaw,
     cost_usd: Option<f64>,
+    mode: CostMode,
+    pricing: &PricingMap,
+) -> f64 {
+    calculate_grok_cost_at(raw_model, usage, cost_usd, None, mode, pricing)
+}
+
+fn calculate_grok_cost_at(
+    raw_model: &str,
+    usage: TokenUsageRaw,
+    cost_usd: Option<f64>,
+    timestamp: Option<TimestampMs>,
     mode: CostMode,
     pricing: &PricingMap,
 ) -> f64 {
@@ -460,12 +479,30 @@ fn calculate_grok_cost(
         // back to the pricing table when a turn recorded no ticks.
         CostMode::Auto if cost_usd.is_some() => cost_usd.unwrap_or(0.0),
         CostMode::Auto | CostMode::Calculate => {
-            for candidate in pricing_candidates(raw_model) {
-                if pricing.find(&candidate).is_some() {
-                    return calculate_cost_for_usage(
-                        Some(&candidate),
+            // Exact hits across every candidate first: `find` falls back to
+            // substring matching, and a fuzzy hit on the first candidate would
+            // shadow an exact entry - a user pricing override included - that a
+            // later candidate names precisely.
+            let candidates = pricing_candidates(raw_model);
+            for candidate in &candidates {
+                if pricing.find_exact(candidate).is_some() {
+                    return calculate_cost_for_usage_at(
+                        Some(candidate),
                         usage,
                         None,
+                        timestamp,
+                        CostMode::Calculate,
+                        Some(pricing),
+                    );
+                }
+            }
+            for candidate in &candidates {
+                if pricing.find(candidate).is_some() {
+                    return calculate_cost_for_usage_at(
+                        Some(candidate),
+                        usage,
+                        None,
+                        timestamp,
                         CostMode::Calculate,
                         Some(pricing),
                     );
@@ -668,15 +705,26 @@ mod tests {
     }
 
     #[test]
-    fn prices_via_normalized_xai_candidate_when_raw_model_is_missing() {
-        // Embed only the stripped `xai/grok-4.5` form so candidate order is exercised.
+    fn prices_via_the_stripped_candidate_when_the_build_form_is_missing() {
+        // The model is one no pricing table carries, so only the override key
+        // can answer it. That key carries a suffix of its own, which no
+        // `-build` candidate can reach: pricing the model therefore proves the
+        // stripped candidates ran, rather than the fuzzy lookup answering
+        // `xai/<raw>` with a key the raw form already contains.
         let pricing_override = crate::cli::PricingOverride {
             input_cost_per_token: Some(0.001),
             output_cost_per_token: Some(0.002),
             ..crate::cli::PricingOverride::default()
         };
-        let key = "xai/grok-4.5".to_string();
+        let key = "xai/grok-unreleased-9.9-preview".to_string();
         let pricing = PricingMap::load_with_overrides(true, false, [(&key, &pricing_override)]);
+        for unpriced in [
+            "grok-unreleased-9.9-build",
+            "xai/grok-unreleased-9.9-build",
+            "x-ai/grok-unreleased-9.9-build",
+        ] {
+            assert!(pricing.find(unpriced).is_none(), "{unpriced} was priced");
+        }
         let usage = TokenUsageRaw {
             input_tokens: 10,
             output_tokens: 5,
@@ -685,7 +733,13 @@ mod tests {
         };
 
         assert_eq!(
-            calculate_grok_cost("grok-4.5-build", usage, None, CostMode::Calculate, &pricing),
+            calculate_grok_cost(
+                "grok-unreleased-9.9-build",
+                usage,
+                None,
+                CostMode::Calculate,
+                &pricing
+            ),
             0.02
         );
     }
@@ -1053,7 +1107,7 @@ mod tests {
 
     #[test]
     fn auto_prefers_recorded_ticks_while_calculate_recomputes() {
-        let key = "xai/grok-4.5".to_string();
+        let key = "grok-4.5".to_string();
         let pricing_override = crate::cli::PricingOverride {
             input_cost_per_token: Some(1.0),
             output_cost_per_token: Some(1.0),
@@ -1090,7 +1144,7 @@ mod tests {
 
     #[test]
     fn auto_falls_back_to_the_pricing_table_without_ticks() {
-        let key = "xai/grok-4.5".to_string();
+        let key = "grok-4.5".to_string();
         let pricing_override = crate::cli::PricingOverride {
             input_cost_per_token: Some(1.0),
             output_cost_per_token: Some(1.0),

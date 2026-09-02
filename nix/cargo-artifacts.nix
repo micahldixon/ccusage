@@ -33,6 +33,7 @@ let
   ];
   agentNames = [
     "amp"
+    "antigravity"
     "claude"
     "codebuff"
     "codex"
@@ -48,6 +49,7 @@ let
     "opencode"
     "pi"
     "qwen"
+    "zcode"
   ];
   adapterCrates = map (name: "ccusage-adapter-${name}") agentNames ++ [ "ccusage-adapter-all" ];
 
@@ -68,6 +70,7 @@ let
     lib.optionals (lib.elem "ccusage-core" names) [
       (rustRoot + /crates/ccusage-core/src/fast-multiplier-overrides.json)
       (rustRoot + /crates/ccusage-core/src/models-dev-pricing.json)
+      (rustRoot + /crates/ccusage-core/src/models-dev-catalog-rules.json)
     ]
     ++ lib.optionals (lib.elem "ccusage-adapter-codex" names) [
       (rustRoot + /adapters/codex/src/codex-auto-review-fallbacks.json)

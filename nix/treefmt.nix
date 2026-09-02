@@ -62,6 +62,20 @@ in
           fi
         '';
       };
+      generateBunNix = pkgs.writeShellApplication {
+        name = "generate-bun-nix";
+        runtimeInputs = [
+          inputs.bun2nix.packages.${system}.default
+          pkgs.coreutils
+        ];
+        text = ''
+          for lockfile in nix/tools/*/bun.lock; do
+            toolDir="$(dirname "$lockfile")"
+            echo "Regenerating $toolDir"
+            (cd "$toolDir" && bun2nix -o bun.nix)
+          done
+        '';
+      };
     in
     {
       treefmt = {
@@ -83,6 +97,18 @@ in
             configFile = "./typos.toml";
           };
         };
+
+        # The generated pricing snapshots carry upstream model ids verbatim, and
+        # some read as misspellings — one Gemini id ends in a clipped "no
+        # thinking". typos rewrites those to the word it expects, which silently
+        # stops the model from ever matching, and it rewrites them in this
+        # comment too if they are spelled out here. Only typos is excluded,
+        # because the JSON formatter is what keeps these files reviewable.
+        settings.formatter.typos.excludes = [
+          "rust/crates/ccusage-core/src/models-dev-pricing.json"
+          "rust/crates/ccusage-core/src/models-dev-catalog-rules.json"
+          "rust/adapters/codex/src/codex-auto-review-fallbacks.json"
+        ];
 
         # The tagpr PR template is a Go text/template, and oxfmt's markdown
         # rewrites break its <details> block and nested list structure.
@@ -199,6 +225,14 @@ in
       apps.generate-schema = {
         type = "app";
         program = lib.getExe schemaGen;
+      };
+      # `nix run .#generate-bun-nix` derives every committed bun.nix from its
+      # sibling bun.lock. Renovate uses this before committing dependency
+      # updates, while contributors can use `just gen-bun-nix` when a manifest
+      # also needs Bun to resolve a new lockfile.
+      apps.generate-bun-nix = {
+        type = "app";
+        program = lib.getExe generateBunNix;
       };
     };
 }
