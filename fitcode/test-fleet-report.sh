@@ -51,6 +51,13 @@ check yes "antigravity db $home/.gemini/antigravity/conversations/desk.db" \
 check no  ",$home/.gemini/antigravity/conversations" "mixed folder is not read in place"
 check yes "fleet-report-ag."                "mixed folder is read from a temp copy"
 
+# Claude.app Cowork sessions each carry their own transcript folder.
+cowork="$home/Library/Application Support/Claude/local-agent-mode-sessions/org/acct/local_abc/.claude"
+mkdir -p "$cowork/projects"
+out="$(env -u CLAUDE_CONFIG_DIR -u ANTIGRAVITY_DATA_DIR HOME="$home" FLEET_REPORT_DRY=1 \
+       bash "$script" 2>&1)"
+check yes "$cowork" "Claude.app Cowork session is included"
+
 # Mini shape: primary is a real directory, so the shared pool must be added.
 rm "$home/.claude/projects"; mkdir "$home/.claude/projects"
 out="$(env -u CLAUDE_CONFIG_DIR -u ANTIGRAVITY_DATA_DIR HOME="$home" FLEET_REPORT_DRY=1 \

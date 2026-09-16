@@ -2,8 +2,8 @@
 # Fleet usage report: runs this fork's ccusage over every coding agent it supports,
 # with two fixes the stock command lacks on our machines:
 #
-#   1. Claude: counts every account (claude, claude2/3/4 via ~/.claude-shared), not just
-#      ~/.claude. CLAUDE_CONFIG_DIR is set for ccusage only — Claude Code reads the same
+#   1. Claude: counts every account (claude, claude2/3/4 via ~/.claude-shared) and every
+#      Claude.app Cowork session, not just ~/.claude. CLAUDE_CONFIG_DIR is set for ccusage only — Claude Code reads the same
 #      variable, so never export it globally. Directories whose projects/ resolve to the
 #      same place (the MacBook symlinks ~/.claude/projects into the shared pool) are
 #      counted once.
@@ -25,7 +25,11 @@ realdir() { (cd "$1" 2>/dev/null && pwd -P); }
 
 claude_dirs() {
   local seen="" out="" d p
-  for d in "$home/.claude" "$home/.config/claude" "$home/.claude-shared" "$home"/.claude-account*; do
+  # Claude.app Cowork keeps a normal Claude transcript folder per session; the app's Code tab
+  # already writes to ~/.claude/projects.
+  local cowork="$home/Library/Application Support/Claude/local-agent-mode-sessions"
+  for d in "$home/.claude" "$home/.config/claude" "$home/.claude-shared" "$home"/.claude-account* \
+           "$cowork"/*/*/local_*/.claude; do
     [[ -d "$d/projects" ]] || continue
     p="$(realdir "$d/projects")" || continue
     case "|$seen|" in *"|$p|"*) continue ;; esac
