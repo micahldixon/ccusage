@@ -96,6 +96,6 @@ if [[ -n "${FLEET_REPORT_DRY:-}" ]]; then
 fi
 
 bin="$repo/rust/target/release/ccusage"
-(cd "$repo/rust" && cargo build -q --release -p ccusage --features ccusage-core/fetch-litellm-pricing)
+(cd "$repo/rust" && cargo build -q --release -p ccusage --features ccusage-core/fetch-litellm-pricing) >&2
 
 env ${claude:+CLAUDE_CONFIG_DIR="$claude"} ANTIGRAVITY_DATA_DIR="$ag" "$bin" "$@"
