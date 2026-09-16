@@ -17,7 +17,7 @@ Keeping to this rule means updates from the original project never clash with ou
 From the repo root:
 
 ```sh
-git pull upstream main && fitcode/check-fence.sh && git push
+git pull --no-rebase --no-edit upstream main && fitcode/check-fence.sh && git push
 ```
 
 The check stops the push if anything outside `fitcode/` has drifted from the original.

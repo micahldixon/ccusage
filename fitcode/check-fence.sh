@@ -19,7 +19,7 @@ if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
 fi
 
 if ! git merge-base --is-ancestor "$base" HEAD; then
-  echo "fence: upstream has updates not merged here yet. Run: git pull upstream main" >&2
+  echo "fence: upstream has updates not merged here yet. Run: git pull --no-rebase --no-edit upstream main" >&2
   exit 2
 fi
 
