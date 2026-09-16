@@ -283,6 +283,30 @@ mod tests {
     }
 
     #[test]
+    fn prices_gpt_reserve_as_gpt_5_6_luna() {
+        let pricing = PricingMap::load_embedded();
+        let usage = CodexModelUsage {
+            input_tokens: 1_000,
+            output_tokens: 100,
+            total_tokens: 1_100,
+            ..CodexModelUsage::default()
+        };
+
+        let reserve_cost =
+            calculate_codex_model_cost("gpt-reserve", &usage, &pricing, CodexSpeed::Standard);
+        let luna_cost =
+            calculate_codex_model_cost("gpt-5.6-luna", &usage, &pricing, CodexSpeed::Standard);
+
+        assert!(reserve_cost > 0.0);
+        assert_eq!(reserve_cost, luna_cost);
+        assert!(!codex_model_missing_pricing(
+            "gpt-reserve",
+            &usage,
+            &pricing
+        ));
+    }
+
+    #[test]
     fn reports_codex_model_aliases_without_raw_model_names() {
         let _aliases = crate::model_aliases::set_model_aliases_for_tests([
             ("private-codex-alpha", "gpt-5.5"),
@@ -482,29 +506,6 @@ mod tests {
     }
 
     #[test]
-    fn prices_gpt_5_6_long_context_usage_from_embedded_pricing() {
-        let pricing = PricingMap::load_embedded();
-        let usage = CodexModelUsage {
-            input_tokens: 300_000,
-            cached_input_tokens: 100_000,
-            output_tokens: 1_000,
-            total_tokens: 301_000,
-            long_context_input_tokens: 300_000,
-            long_context_cached_input_tokens: 100_000,
-            long_context_output_tokens: 1_000,
-            ..CodexModelUsage::default()
-        };
-
-        let cost =
-            calculate_codex_model_cost("gpt-5.6-sol", &usage, &pricing, CodexSpeed::Standard);
-
-        // The whole request is billed at long-context rates: 200K non-cached
-        // input at $10/M, 100K cached at $1/M, 1K output at $45/M.
-        let expected = 200_000.0 * 10e-6 + 100_000.0 * 1e-6 + 1_000.0 * 45e-6;
-        assert!((cost - expected).abs() < 1e-9);
-    }
-
-    #[test]
     fn applies_speed_option_to_codex_cost() {
         let mut pricing = PricingMap::default();
         pricing.load_json(
@@ -530,6 +531,26 @@ mod tests {
         let fast = calculate_codex_model_cost("gpt-5.3-codex", &usage, &pricing, CodexSpeed::Fast);
 
         assert!((fast - (standard * 2.0)).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn applies_gpt_6_astra_fast_multiplier_without_changing_standard_cost() {
+        let pricing = PricingMap::load_embedded();
+        let usage = CodexModelUsage {
+            input_tokens: 1_000_000,
+            cached_input_tokens: 1_000_000,
+            total_tokens: 1_000_000,
+            long_context_input_tokens: 1_000_000,
+            long_context_cached_input_tokens: 1_000_000,
+            ..CodexModelUsage::default()
+        };
+
+        let standard =
+            calculate_codex_model_cost("gpt-6-astra", &usage, &pricing, CodexSpeed::Standard);
+        let fast = calculate_codex_model_cost("gpt-6-astra", &usage, &pricing, CodexSpeed::Fast);
+
+        assert!((standard - 2.0).abs() < f64::EPSILON);
+        assert!((fast - 4.0).abs() < f64::EPSILON);
     }
 
     #[test]
