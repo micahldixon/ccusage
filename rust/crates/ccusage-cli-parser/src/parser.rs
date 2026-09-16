@@ -125,6 +125,9 @@ impl Cli {
         if let Some(message) = last_option_error(command.as_ref(), &shared) {
             return Err(message);
         }
+        if let Some(message) = date_window_error(command.as_ref(), &shared) {
+            return Err(message);
+        }
         Ok(Self { command, shared })
     }
 }
@@ -215,6 +218,7 @@ fn parse_command(
         "statusline" => {
             let mut args = StatuslineArgs::default();
             config.apply_statusline_args(&mut args);
+            args.timezone = shared.timezone.clone();
             while parser.peek().is_some() {
                 match parser.next_flag()?.as_str() {
                     "-O" | "--offline" => args.offline = true,
@@ -318,6 +322,13 @@ fn parse_command(
             STANDARD_AGENT_REPORTS,
             Command::Gemini,
         ),
+        "antigravity" => parse_basic_agent_command(
+            parser,
+            shared,
+            "antigravity",
+            STANDARD_AGENT_REPORTS,
+            Command::Antigravity,
+        ),
         "kimi" => parse_basic_agent_command(
             parser,
             shared,
@@ -339,6 +350,13 @@ fn parse_command(
             "grok",
             STANDARD_AGENT_REPORTS,
             Command::Grok,
+        ),
+        "zcode" => parse_basic_agent_command(
+            parser,
+            shared,
+            "zcode",
+            STANDARD_AGENT_REPORTS,
+            Command::ZCode,
         ),
         _ => Err(format!("Unknown command '{command}'")),
     }
@@ -729,7 +747,10 @@ fn parse_shared_arg(parser: &mut ArgParser, shared: &mut SharedArgs) -> Result<(
                 .parse()
                 .map_err(|_| "Invalid value for --debug-samples".to_string())?
         }
-        "-o" | "--order" => shared.order = parse_sort_order(&parser.value_for("--order")?)?,
+        "-o" | "--order" => {
+            shared.order = parse_sort_order(&parser.value_for("--order")?)?;
+            shared.order_explicit = true;
+        }
         "-b" | "--breakdown" => shared.breakdown = true,
         "-O" | "--offline" => shared.offline = true,
         "--no-offline" => shared.no_offline = true,
@@ -768,9 +789,11 @@ fn is_command(arg: &str) -> bool {
             | "kilo"
             | "copilot"
             | "gemini"
+            | "antigravity"
             | "kimi"
             | "qwen"
             | "grok"
+            | "zcode"
     )
 }
 
@@ -927,10 +950,12 @@ fn is_agent_command(command: &str) -> bool {
             | "kilo"
             | "copilot"
             | "gemini"
+            | "antigravity"
             | "kimi"
             | "qwen"
             | "openclaw"
             | "grok"
+            | "zcode"
     )
 }
 
@@ -943,7 +968,7 @@ fn agent_report_supported(agent: &str, report: &str) -> bool {
         "codex" => matches!(report, "daily" | "monthly" | "session"),
         "opencode" => matches!(report, "daily" | "weekly" | "monthly" | "session"),
         "amp" | "droid" | "codebuff" | "hermes" | "pi" | "goose" | "kilo" | "copilot"
-        | "gemini" | "kimi" | "qwen" | "openclaw" | "grok" => {
+        | "gemini" | "antigravity" | "kimi" | "qwen" | "openclaw" | "grok" | "zcode" => {
             matches!(report, "daily" | "monthly" | "session")
         }
         _ => false,
@@ -964,10 +989,12 @@ fn agent_display_name(agent: &str) -> &'static str {
         "kilo" => "Kilo",
         "copilot" => "GitHub Copilot CLI",
         "gemini" => "Gemini CLI",
+        "antigravity" => "Antigravity",
         "kimi" => "Kimi",
         "qwen" => "Qwen",
         "openclaw" => "OpenClaw",
         "grok" => "Grok",
+        "zcode" => "ZCode",
         _ => unreachable!("agent is prevalidated"),
     }
 }
@@ -1021,10 +1048,14 @@ fn parse_last_periods(value: &str) -> Result<u32, String> {
     }
 }
 
-/// `--last` counts the report's own calendar periods, so it only makes sense on
-/// the reports that group rows by day, week, or month.
-fn last_option_error(command: Option<&Command>, root_shared: &SharedArgs) -> Option<String> {
-    let (shared, supported) = match command {
+/// The shared options that apply to a command (statusline falls back to the root
+/// options), plus whether that command groups rows by a calendar period (day,
+/// week, or month).
+fn report_shared<'a>(
+    command: Option<&'a Command>,
+    root_shared: &'a SharedArgs,
+) -> (&'a SharedArgs, bool) {
+    match command {
         None => (root_shared, true),
         Some(Command::All(args)) => (&args.shared, args.kind != AgentReportKind::Session),
         Some(Command::Daily(args)) => (&args.shared, true),
@@ -1045,12 +1076,20 @@ fn last_option_error(command: Option<&Command>, root_shared: &SharedArgs) -> Opt
             | Command::Kilo(args)
             | Command::Copilot(args)
             | Command::Gemini(args)
+            | Command::Antigravity(args)
             | Command::Kimi(args)
             | Command::Qwen(args)
             | Command::OpenClaw(args)
-            | Command::Grok(args),
+            | Command::Grok(args)
+            | Command::ZCode(args),
         ) => (&args.shared, args.kind != AgentReportKind::Session),
-    };
+    }
+}
+
+/// `--last` counts the report's own calendar periods, so it only makes sense on
+/// the reports that group rows by day, week, or month.
+fn last_option_error(command: Option<&Command>, root_shared: &SharedArgs) -> Option<String> {
+    let (shared, supported) = report_shared(command, root_shared);
     shared.last?;
     if !supported {
         return Some(
@@ -1065,6 +1104,20 @@ fn last_option_error(command: Option<&Command>, root_shared: &SharedArgs) -> Opt
         return Some("The --last option cannot be used with --sections.".to_string());
     }
     None
+}
+
+/// Both bounds are already normalized to `YYYYMMDD`, so a plain string comparison
+/// orders them. A reversed window would otherwise load everything and print an
+/// empty report that looks like missing data.
+fn date_window_error(command: Option<&Command>, root_shared: &SharedArgs) -> Option<String> {
+    if matches!(command, Some(Command::Statusline(_))) {
+        return None;
+    }
+    let (shared, _) = report_shared(command, root_shared);
+    let since = shared.since.as_deref()?;
+    let until = shared.until.as_deref()?;
+    (since > until)
+        .then(|| format!("The --since date '{since}' is later than the --until date '{until}'."))
 }
 
 fn parse_cost_mode(value: &str) -> Result<CostMode, String> {

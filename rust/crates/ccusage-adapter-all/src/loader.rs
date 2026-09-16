@@ -11,8 +11,8 @@ use crate::{
     BUILT_IN_AGENT_NAMES, CodexGroup, LoadedEntry, ModelBreakdown, PricingMap, Result,
     SessionAccumulator, UsageSummary,
     adapter::{
-        amp, claude, codebuff, codex, copilot, droid, gemini, goose, grok, hermes, kilo, kimi,
-        openclaw, opencode, pi, qwen,
+        amp, antigravity, claude, codebuff, codex, copilot, droid, gemini, goose, grok, hermes,
+        kilo, kimi, openclaw, opencode, pi, qwen, zcode,
     },
     cli::{AgentReportKind, CodexSpeed, NamedPiStore, SharedArgs, WeekDay},
     filter_loaded_entries_by_date, json_float,
@@ -135,7 +135,7 @@ fn load_base_rows(
                     "opencode",
                     load_kind,
                     &loader_shared,
-                    || opencode::load_entries(&loader_shared),
+                    || opencode::load_entries(&loader_shared, load_kind),
                     opencode::summarize_entries,
                 )?;
                 // The OpenCode loader narrows to the date window as it reads, so
@@ -291,6 +291,21 @@ fn load_base_rows(
         AgentLoadSpec {
             index: 13,
             agent: BUILT_IN_AGENT_NAMES[13],
+            progress_agent: crate::progress::UsageLoadAgent("Antigravity"),
+            load: Box::new(|| {
+                load_priced_summary_agent_rows(
+                    "antigravity",
+                    load_kind,
+                    &loader_shared,
+                    pricing,
+                    antigravity::load_entries,
+                    antigravity::summarize_entries,
+                )
+            }),
+        },
+        AgentLoadSpec {
+            index: 14,
+            agent: BUILT_IN_AGENT_NAMES[14],
             progress_agent: crate::progress::UsageLoadAgent("Kimi"),
             load: Box::new(|| {
                 load_priced_summary_agent_rows(
@@ -304,14 +319,14 @@ fn load_base_rows(
             }),
         },
         AgentLoadSpec {
-            index: 14,
-            agent: BUILT_IN_AGENT_NAMES[14],
+            index: 15,
+            agent: BUILT_IN_AGENT_NAMES[15],
             progress_agent: crate::progress::UsageLoadAgent("Qwen"),
             load: Box::new(|| load_qwen_rows(load_kind, &loader_shared)),
         },
         AgentLoadSpec {
-            index: 15,
-            agent: BUILT_IN_AGENT_NAMES[15],
+            index: 16,
+            agent: BUILT_IN_AGENT_NAMES[16],
             progress_agent: crate::progress::UsageLoadAgent("Grok"),
             load: Box::new(|| {
                 let mut rows = load_summary_agent_rows(
@@ -323,6 +338,21 @@ fn load_base_rows(
                 )?;
                 rows.detected = rows.detected || grok::has_data();
                 Ok(rows)
+            }),
+        },
+        AgentLoadSpec {
+            index: 17,
+            agent: BUILT_IN_AGENT_NAMES[17],
+            progress_agent: crate::progress::UsageLoadAgent("ZCode"),
+            load: Box::new(|| {
+                load_priced_summary_agent_rows(
+                    "zcode",
+                    load_kind,
+                    &loader_shared,
+                    pricing,
+                    zcode::load_entries,
+                    zcode::summarize_entries,
+                )
             }),
         },
     ];
@@ -370,7 +400,17 @@ fn finish_rows(kind: AgentReportKind, mut rows: Vec<AllRow>, shared: &SharedArgs
         for row in &mut rows {
             row.metadata_agents = None;
         }
-        sort_rows(&mut rows, &shared.order);
+        rows.sort_by(|a, b| {
+            let cost_order = if shared.order_explicit && shared.order == crate::cli::SortOrder::Asc
+            {
+                a.total_cost.total_cmp(&b.total_cost)
+            } else {
+                b.total_cost.total_cmp(&a.total_cost)
+            };
+            cost_order
+                .then_with(|| a.period.cmp(&b.period))
+                .then_with(|| a.agent.cmp(b.agent))
+        });
         return rows;
     }
 
@@ -640,8 +680,7 @@ fn load_codex_rows(
         });
     }
 
-    let mut events = codex::load_codex_events(shared)?;
-    let detected = !events.is_empty();
+    let (mut events, detected) = codex::load_codex_events_with_detection(shared)?;
     codex::filter_events_by_date(&mut events, shared)?;
     let groups = codex::aggregate_events(&events, kind, shared.timezone.as_deref())?;
     let speed = codex::resolve_codex_speed(CodexSpeed::Auto);
@@ -799,13 +838,16 @@ where
         .models
         .iter()
         .map(|(model, usage)| {
-            let input =
-                codex::non_cached_input_tokens(usage.input_tokens, usage.cached_input_tokens);
+            let input = codex::non_cached_input_tokens(
+                usage.input_tokens,
+                usage.cached_input_tokens,
+                usage.cache_creation_tokens,
+            );
             ModelBreakdown {
                 model_name: model.clone(),
                 input_tokens: input,
                 output_tokens: usage.output_tokens,
-                cache_creation_tokens: 0,
+                cache_creation_tokens: usage.cache_creation_tokens,
                 cache_read_tokens: usage.cached_input_tokens,
                 extra_total_tokens: 0,
                 cost: codex::calculate_codex_model_cost(model, usage, pricing, speed),
@@ -818,9 +860,13 @@ where
         period: period.to_string(),
         agent: "codex",
         models_used: group.models.keys().cloned().collect(),
-        input_tokens: codex::non_cached_input_tokens(group.input_tokens, group.cached_input_tokens),
+        input_tokens: codex::non_cached_input_tokens(
+            group.input_tokens,
+            group.cached_input_tokens,
+            group.cache_creation_tokens,
+        ),
         output_tokens: group.output_tokens,
-        cache_creation_tokens: 0,
+        cache_creation_tokens: group.cache_creation_tokens,
         cache_read_tokens: group.cached_input_tokens,
         total_tokens: group.total_tokens,
         total_cost: codex::calculate_group_cost(group, pricing, speed),
@@ -886,6 +932,117 @@ mod tests {
         }
     }
 
+    fn sorting_row(period: &str, agent: &'static str, cost: f64) -> AllRow {
+        let mut summary = usage_summary(period, 10);
+        summary.total_cost = cost;
+        summary_rows(agent, vec![summary], false).pop().unwrap()
+    }
+
+    #[test]
+    fn session_cost_order_honors_explicit_ascending_order() {
+        let shared = SharedArgs {
+            order: crate::cli::SortOrder::Asc,
+            order_explicit: true,
+            ..SharedArgs::default()
+        };
+        let rows = vec![
+            sorting_row("a-expensive", "claude", 20.0),
+            sorting_row("z-cheap", "codex", 1.0),
+            sorting_row("z-cheap", "claude", 1.0),
+            sorting_row("b-zero", "claude", 0.0),
+        ];
+        let sorted = finish_rows(AgentReportKind::Session, rows, &shared);
+        let keys: Vec<_> = sorted
+            .iter()
+            .map(|row| (row.period.as_str(), row.agent))
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                ("b-zero", "claude"),
+                ("z-cheap", "claude"),
+                ("z-cheap", "codex"),
+                ("a-expensive", "claude")
+            ]
+        );
+    }
+
+    #[test]
+    fn session_cost_order_uses_id_then_agent_for_ties() {
+        for (order, order_explicit) in [
+            (crate::cli::SortOrder::Asc, false),
+            (crate::cli::SortOrder::Desc, true),
+        ] {
+            let rows = vec![
+                sorting_row("b-tie", "codex", 20.0),
+                sorting_row("a-zero", "claude", 0.0),
+                sorting_row("z-tie", "claude", 20.0),
+                sorting_row("b-tie", "claude", 20.0),
+                sorting_row("c-cheap", "codex", 1.0),
+            ];
+            let shared = SharedArgs {
+                order,
+                order_explicit,
+                ..SharedArgs::default()
+            };
+            let sorted = finish_rows(AgentReportKind::Session, rows, &shared);
+            let keys: Vec<_> = sorted
+                .iter()
+                .map(|row| (row.period.as_str(), row.agent))
+                .collect();
+            assert_eq!(
+                keys,
+                [
+                    ("b-tie", "claude"),
+                    ("b-tie", "codex"),
+                    ("z-tie", "claude"),
+                    ("c-cheap", "codex"),
+                    ("a-zero", "claude"),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn session_cost_order_handles_empty_and_single_row_reports() {
+        let shared = SharedArgs::default();
+        assert!(finish_rows(AgentReportKind::Session, Vec::new(), &shared).is_empty());
+        let rows = finish_rows(
+            AgentReportKind::Session,
+            vec![sorting_row("only-session", "claude", 0.0)],
+            &shared,
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].period, "only-session");
+    }
+
+    #[test]
+    fn period_reports_keep_chronological_order_regardless_of_cost() {
+        for kind in [
+            AgentReportKind::Daily,
+            AgentReportKind::Weekly,
+            AgentReportKind::Monthly,
+        ] {
+            for (order, expected_costs) in [
+                (crate::cli::SortOrder::Asc, [1.0, 20.0, 3.0]),
+                (crate::cli::SortOrder::Desc, [3.0, 20.0, 1.0]),
+            ] {
+                let rows = vec![
+                    sorting_row("2026-03-02", "claude", 3.0),
+                    sorting_row("2026-01-05", "claude", 1.0),
+                    sorting_row("2026-02-02", "claude", 20.0),
+                ];
+                let shared = SharedArgs {
+                    order,
+                    ..SharedArgs::default()
+                };
+                let sorted = finish_rows(kind, rows, &shared);
+                let costs: Vec<_> = sorted.iter().map(|row| row.total_cost).collect();
+                assert_eq!(costs, expected_costs, "{kind:?} {order:?}");
+            }
+        }
+    }
+
     #[test]
     fn filters_daily_summaries_with_compact_date_bounds() {
         let mut rows = vec![
@@ -945,6 +1102,50 @@ mod tests {
         assert!((focused_cost - 40e-6).abs() < f64::EPSILON);
         assert!((unified.total_cost - focused_cost).abs() < f64::EPSILON);
         assert!((unified.model_breakdowns[0].cost - focused_cost).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn unified_row_reports_codex_cache_write_tokens_and_cost() {
+        let pricing = PricingMap::load_embedded();
+        let usage = crate::CodexModelUsage {
+            input_tokens: 935_040,
+            cached_input_tokens: 875_306,
+            cache_creation_tokens: 57_610,
+            output_tokens: 11_150,
+            total_tokens: 946_190,
+            long_context_input_tokens: 935_040,
+            long_context_cached_input_tokens: 875_306,
+            long_context_cache_creation_tokens: 57_610,
+            long_context_output_tokens: 11_150,
+            ..crate::CodexModelUsage::default()
+        };
+        let mut group = CodexGroup {
+            input_tokens: 935_040,
+            cached_input_tokens: 875_306,
+            cache_creation_tokens: 57_610,
+            output_tokens: 11_150,
+            total_tokens: 946_190,
+            ..CodexGroup::default()
+        };
+        group.models.insert("gpt-5.6-terra".to_string(), usage);
+
+        let row = codex_group_row(
+            "2026-08-20",
+            &group,
+            &pricing,
+            codex::CodexSpeedPolicy::Forced(codex::CodexServiceTier::Standard),
+        );
+        let expected_cost =
+            2_124.0 * 4e-6 + 875_306.0 * 0.4e-6 + 57_610.0 * 5e-6 + 11_150.0 * 18e-6;
+
+        assert_eq!(row.input_tokens, 2_124);
+        assert_eq!(row.cache_creation_tokens, 57_610);
+        assert_eq!(row.cache_read_tokens, 875_306);
+        assert!((row.total_cost - expected_cost).abs() < 1e-12);
+        assert_eq!(row.model_breakdowns[0].input_tokens, 2_124);
+        assert_eq!(row.model_breakdowns[0].cache_creation_tokens, 57_610);
+        assert_eq!(row.model_breakdowns[0].cache_read_tokens, 875_306);
+        assert!((row.model_breakdowns[0].cost - expected_cost).abs() < 1e-12);
     }
 
     fn pi_path_subcommand_rows(
