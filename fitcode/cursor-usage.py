@@ -61,6 +61,8 @@ def event_money(ev: dict) -> tuple[float, float]:
 def aggregate(events: list) -> dict:
     days: dict[str, dict] = {}
     months: dict[str, dict] = {}
+    by_model: dict[str, dict] = {}
+    by_month_model: dict[tuple[str, str], dict] = {}
     totals = {"charged_usd": 0.0, "list_usd": 0.0, "events": 0}
 
     def bump(bucket: dict, key: str, charged: float, listed: float, model: str) -> None:
@@ -85,6 +87,18 @@ def aggregate(events: list) -> dict:
         month = ts.strftime("%Y-%m")
         bump(days, day, charged, listed, model)
         bump(months, month, charged, listed, model)
+        mrow = by_model.setdefault(
+            model, {"charged_usd": 0.0, "list_usd": 0.0, "events": 0}
+        )
+        mrow["charged_usd"] += charged
+        mrow["list_usd"] += listed
+        mrow["events"] += 1
+        mm = by_month_model.setdefault(
+            (month, model), {"charged_usd": 0.0, "list_usd": 0.0, "events": 0}
+        )
+        mm["charged_usd"] += charged
+        mm["list_usd"] += listed
+        mm["events"] += 1
         totals["charged_usd"] += charged
         totals["list_usd"] += listed
         totals["events"] += 1
@@ -104,9 +118,36 @@ def aggregate(events: list) -> dict:
             )
         return out
 
+    model_rows = []
+    for name in sorted(by_model):
+        row = by_model[name]
+        model_rows.append(
+            {
+                "model": name,
+                "charged_usd": round(row["charged_usd"], 6),
+                "list_usd": round(row["list_usd"], 6),
+                "events": row["events"],
+            }
+        )
+
+    month_model_rows = []
+    for month, name in sorted(by_month_model):
+        row = by_month_model[(month, name)]
+        month_model_rows.append(
+            {
+                "month": month,
+                "model": name,
+                "charged_usd": round(row["charged_usd"], 6),
+                "list_usd": round(row["list_usd"], 6),
+                "events": row["events"],
+            }
+        )
+
     return {
         "days": rows(days, "date"),
         "months": rows(months, "month"),
+        "by_model": model_rows,
+        "by_month_model": month_model_rows,
         "totals": {
             "charged_usd": round(totals["charged_usd"], 6),
             "list_usd": round(totals["list_usd"], 6),

@@ -78,14 +78,14 @@ use on that Mac then.
 
 ## Spend history Google Sheet
 
-A Fitcode Drive sheet holds Cursor's billed history plus a ccusage fleet dump:
-[Fitcode agent spend history](https://docs.google.com/spreadsheets/d/1on7v_bYdEmb2UXIuWpDuYTLZ-JPFOojJrqmvlOtnK6Q/edit).
-Cursor is account-wide. The fleet tab is whatever JSON you pass (one Mac, or `--fleet` after both Macs are on the same commit).
+The live view is [Fitcode agent spend history](https://docs.google.com/spreadsheets/d/1on7v_bYdEmb2UXIuWpDuYTLZ-JPFOojJrqmvlOtnK6Q/edit):
+**Dashboard** (prune: shop total, keep/cut, charts), **Master** (one row per month / machine / source / family / model / effort / spend), **ChartData** (ignore; feeds the charts). Cursor is a source on Master, machine `account` — it cannot be split Mini vs MacBook.
 
 ```sh
 python3 fitcode/cursor-usage.py --live --json > /tmp/cursor-usage.json
-bash fitcode/fleet-report.sh monthly --json --offline > /tmp/fleet-monthly.json
-python3 fitcode/export-agent-spend-sheet.py --cursor-json /tmp/cursor-usage.json --fleet-json /tmp/fleet-monthly.json --json > /tmp/spend-sheet.json
+bash fitcode/fleet-report.sh monthly --json --offline --by-agent > /tmp/fleet-mini.json
+# same command on the MacBook → /tmp/fleet-macbook.json
+python3 fitcode/export-agent-spend-sheet.py --mini-json /tmp/fleet-mini.json --macbook-json /tmp/fleet-macbook.json --cursor-json /tmp/cursor-usage.json --json > /tmp/spend-sheet.json
 gog --account micah@fitcode.dev --no-input sheets batch-update 1on7v_bYdEmb2UXIuWpDuYTLZ-JPFOojJrqmvlOtnK6Q --data-json @/tmp/spend-sheet.json
 ```
 

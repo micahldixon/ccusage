@@ -113,6 +113,16 @@ python3 -c "import sys; sys.exit(0 if abs(float('$day_sum')-float('$charged'))<1
 months="$(get 'len(d["months"])' "$out")"
 [ "$months" = "2" ] && pass "two months" || bad "two months (got $months)"
 
+gpt_charged="$(get 'next(m["charged_usd"] for m in d["by_model"] if m["model"]=="gpt-5")' "$out")"
+python3 -c "import sys; sys.exit(0 if abs(float('$gpt_charged')-3.0)<1e-9 else 1)" \
+  && pass "by_model gpt-5 charged is \$3.00" \
+  || bad "by_model gpt-5 (got $gpt_charged)"
+
+gpt_month="$(get 'next(m["charged_usd"] for m in d["by_month_model"] if m["month"]=="2025-07" and m["model"]=="gpt-5")' "$out")"
+python3 -c "import sys; sys.exit(0 if abs(float('$gpt_month')-3.0)<1e-9 else 1)" \
+  && pass "by_month_model gpt-5 in 2025-07 is \$3.00" \
+  || bad "by_month_model (got $gpt_month)"
+
 if printf '%s' "$out" | grep -qi 'secret@example.com'; then
   bad "output omits owningUser email"
 else

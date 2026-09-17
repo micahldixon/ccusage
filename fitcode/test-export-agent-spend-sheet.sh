@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test for export-agent-spend-sheet.py payload shape and privacy.
+# Self-test: Master grain includes Cursor; Dashboard prune calls; Combined spend adds.
 set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -19,39 +19,78 @@ print($1)
 " <<<"$2"
 }
 
-cat >"$tmp/cursor.json" <<'EOF'
-{
-  "days": [
-    {"date": "2025-07-06", "charged_usd": 3.0, "list_usd": 3.8, "events": 2, "models": {"gpt-5": 2}},
-    {"date": "2026-09-10", "charged_usd": 0.0, "list_usd": 0.0869, "events": 1, "models": {"composer-2.5": 1}}
-  ],
-  "months": [
-    {"month": "2025-07", "charged_usd": 3.0, "list_usd": 3.8, "events": 2, "models": {"gpt-5": 2}},
-    {"month": "2026-09", "charged_usd": 0.0, "list_usd": 0.0869, "events": 1, "models": {"composer-2.5": 1}}
-  ],
-  "totals": {"charged_usd": 3.0, "list_usd": 3.8869, "events": 3}
-}
-EOF
-cat >"$tmp/fleet.json" <<'EOF'
+cat >"$tmp/mini.json" <<'EOF'
 {
   "monthly": [
-    {"period": "2026-09", "totalCost": 14931.48, "totalTokens": 100, "metadata": {"agents": ["claude", "jcode"]}}
+    {
+      "period": "2026-08",
+      "totalCost": 40.0,
+      "agents": [{"agent": "claude", "totalCost": 40.0, "modelBreakdowns": [{"modelName": "claude-opus-5", "cost": 40.0}]}]
+    },
+    {
+      "period": "2026-09",
+      "totalCost": 50.0,
+      "agents": [{"agent": "claude", "totalCost": 50.0, "modelBreakdowns": [{"modelName": "claude-opus-5", "cost": 50.0}]}]
+    }
   ],
-  "totals": {"totalCost": 14931.48, "totalTokens": 100}
+  "totals": {"totalCost": 90.0}
+}
+EOF
+cat >"$tmp/macbook.json" <<'EOF'
+{
+  "monthly": [
+    {
+      "period": "2026-09",
+      "totalCost": 2.0,
+      "agents": [{"agent": "copilot", "totalCost": 2.0, "modelBreakdowns": [{"modelName": "gpt-4o", "cost": 2.0}]}]
+    }
+  ],
+  "totals": {"totalCost": 2.0}
+}
+EOF
+cat >"$tmp/cursor.json" <<'EOF'
+{
+  "by_month_model": [
+    {"month": "2026-09", "model": "claude-4.6-sonnet-high-thinking", "charged_usd": 10.0, "list_usd": 12.0, "events": 2}
+  ],
+  "totals": {"charged_usd": 10.0, "list_usd": 12.0, "events": 2}
 }
 EOF
 
-out="$(python3 "$script" --cursor-json "$tmp/cursor.json" --fleet-json "$tmp/fleet.json" --json)"
-ranges="$(get '[x["range"] for x in d]' "$out")"
-python3 -c "import sys; sys.exit(0 if 'Read me' in '''$ranges''' and 'Cursor monthly' in '''$ranges''' else 1)" \
-  && pass "payload has Read me and Cursor monthly ranges" \
-  || bad "payload ranges (got $ranges)"
+out="$(python3 "$script" --mini-json "$tmp/mini.json" --macbook-json "$tmp/macbook.json" --cursor-json "$tmp/cursor.json" --json)"
 
-july="$(get 'next(r["values"] for r in d if "Cursor monthly" in r["range"])[1][0]' "$out")"
-[ "$july" = "2025-07" ] && pass "monthly table starts with 2025-07" || bad "monthly first row (got $july)"
+tabs="$(get '[x["range"] for x in d]' "$out")"
+python3 -c "import sys; t='''$tabs'''; sys.exit(0 if 'Dashboard!A1' in t and 'Master!A1' in t else 1)" \
+  && pass "payload has Dashboard and Master" \
+  || bad "tabs (got $tabs)"
 
-charged="$(get 'next(r["values"] for r in d if "Cursor monthly" in r["range"])[1][1]' "$out")"
-[ "$charged" = "3.0" ] && pass "monthly charged_usd copied" || bad "monthly charged (got $charged)"
+python3 -c "import sys; t='''$tabs'''; sys.exit(0 if 'Family!' not in t and 'Cursor!' not in t else 1)" \
+  && pass "no Family or Cursor ghetto tabs" \
+  || bad "old tabs still present ($tabs)"
+
+master="$(get 'next(r["values"] for r in d if r["range"].startswith("Master"))' "$out")"
+python3 - <<PY
+import ast, sys
+m = ast.literal_eval('''$master''')
+body = m[1:]
+spend = round(sum(float(r[6]) for r in body), 2)
+cursor = [r for r in body if r[2]=="cursor"]
+sys.exit(0 if spend==102.0 and cursor and cursor[0][1]=="account" else 1)
+PY
+if [ $? -eq 0 ]; then
+  pass "Master spend is 90+2+10=102 and Cursor is machine=account"
+else
+  bad "Master spend/cursor grain"
+fi
+
+shop="$(get 'next(row[1] for row in next(r["values"] for r in d if r["range"]=="Dashboard!A1") if row and row[0]=="Shop total")' "$out")"
+[ "$shop" = "102.0" ] && pass "Dashboard shop total is 102" || bad "shop (got $shop)"
+
+call_copilot="$(get 'next(row[4] for row in next(r["values"] for r in d if r["range"]=="Dashboard!A1") if row and row[0]=="copilot")' "$out")"
+[ "$call_copilot" = "Cut candidate" ] && pass "copilot is Cut candidate" || bad "copilot call (got $call_copilot)"
+
+call_claude="$(get 'next(row[4] for row in next(r["values"] for r in d if r["range"]=="Dashboard!A1") if row and row[0]=="claude")' "$out")"
+[ "$call_claude" = "Keep" ] && pass "claude is Keep" || bad "claude call (got $call_claude)"
 
 if printf '%s' "$out" | grep -qi 'secret@example.com'; then
   bad "payload omits emails"
@@ -59,21 +98,26 @@ else
   pass "payload omits emails"
 fi
 
-fleet_total="$(get 'next(r["values"] for r in d if "Fleet monthly" in r["range"])[-1][1]' "$out")"
-[ "$fleet_total" = "14931.48" ] && pass "fleet totalCost lands on TOTAL row" || bad "fleet total (got $fleet_total)"
-
 mut="$tmp/mutant.py"
 python3 - "$script" "$mut" <<'PY'
 import pathlib, sys
 src = pathlib.Path(sys.argv[1]).read_text()
-old = 'str(row.get("charged_usd", ""))'
+old = 'rows.append([period, machine, source, family, model, effort, usd])'
 if old not in src:
     raise SystemExit("mutant seed missing")
-pathlib.Path(sys.argv[2]).write_text(src.replace(old, '"999"', 1))
+# drop cursor rows
+src2 = src.replace(
+    'rows.append(\n                [\n                    str(item.get("month") or ""),\n                    "account",\n                    "cursor",',
+    'if False: rows.append(\n                [\n                    str(item.get("month") or ""),\n                    "account",\n                    "cursor",',
+    1,
+)
+pathlib.Path(sys.argv[2]).write_text(src2)
 PY
-mout="$(python3 "$mut" --cursor-json "$tmp/cursor.json" --json)"
-mch="$(get 'next(r["values"] for r in d if "Cursor monthly" in r["range"])[1][1]' "$mout")"
-[ "$mch" = "999" ] && pass "break-test: swapping charged_usd is detected" || bad "break-test charged (got $mch)"
+mout="$(python3 "$mut" --mini-json "$tmp/mini.json" --macbook-json "$tmp/macbook.json" --cursor-json "$tmp/cursor.json" --json 2>/dev/null || true)"
+mshop="$(get 'next(row[1] for row in next(r["values"] for r in d if r["range"]=="Dashboard!A1") if row and row[0]=="Shop total")' "$mout" 2>/dev/null || echo fail)"
+python3 -c "import sys; sys.exit(0 if '$mshop'!='102.0' else 1)" \
+  && pass "break-test: dropping Cursor from Master changes shop total" \
+  || bad "break-test shop still 102 (got $mshop)"
 
 if [ "$failures" -ne 0 ]; then
   echo "$failures failed"
