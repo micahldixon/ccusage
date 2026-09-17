@@ -60,7 +60,8 @@ Fleet coverage (checked 2026-09-16 on both Macs; jcode added 2026-09-17):
 | pi, grok | Yes |
 | agy (gemini) | Supported, but agy keeps no transcripts with usage |
 | jcode | Yes (converted from `~/.jcode/sessions` and priced by ccusage) |
-| Cursor (agents, IDE, cursor-agent), ChatGPT.app Work mode | No: no token usage stored locally |
+| Cursor (agents, IDE, cursor-agent) | Yes, from Cursor's account usage API (not local files). Charged dollars are `chargedCents/100`. |
+| ChatGPT.app Work mode | No: no token usage stored locally |
 | forge-agent | No data found on either Mac |
 
 Each Mac reports only its own logs. For the fleet total, run the report on the mini with
@@ -74,6 +75,19 @@ and both Macs must be on the same commit with no uncommitted changes to the `fit
 the mini's time zone unless you pass `--timezone`. `--fleet` adds up daily, weekly and monthly
 reports only, jcode included. A tool missing from one Mac's report for a period simply had no
 use on that Mac then.
+
+## Spend history Google Sheet
+
+A Fitcode Drive sheet holds Cursor's billed history plus a ccusage fleet dump:
+[Fitcode agent spend history](https://docs.google.com/spreadsheets/d/1on7v_bYdEmb2UXIuWpDuYTLZ-JPFOojJrqmvlOtnK6Q/edit).
+Cursor is account-wide. The fleet tab is whatever JSON you pass (one Mac, or `--fleet` after both Macs are on the same commit).
+
+```sh
+python3 fitcode/cursor-usage.py --live --json > /tmp/cursor-usage.json
+bash fitcode/fleet-report.sh monthly --json --offline > /tmp/fleet-monthly.json
+python3 fitcode/export-agent-spend-sheet.py --cursor-json /tmp/cursor-usage.json --fleet-json /tmp/fleet-monthly.json --json > /tmp/spend-sheet.json
+gog --account micah@fitcode.dev --no-input sheets batch-update 1on7v_bYdEmb2UXIuWpDuYTLZ-JPFOojJrqmvlOtnK6Q --data-json @/tmp/spend-sheet.json
+```
 
 ## Setup (already done on the Mac mini and the MacBook)
 
@@ -101,4 +115,8 @@ git remote set-url --push upstream DISABLED
 - `test-jcode-to-pi.sh` — proves the copy follows jcode's file and token rules. Run it after editing the converter.
 - `merge-reports.py` — adds the two Macs' JSON reports into the fleet total.
 - `test-merge-reports.sh` — proves the adding up. Run it after editing the merge.
+- `cursor-usage.py` — pulls Cursor billed events (live API or a fixture file) and sums them by day.
+- `test-cursor-usage.sh` — proves cents-to-dollars, dates, and that emails stay out of the JSON.
+- `export-agent-spend-sheet.py` — turns that JSON into a Google Sheets payload.
+- `test-export-agent-spend-sheet.sh` — proves the payload shape and a deliberate breakage.
 - `specs/` — our design notes for work built on ccusage.
