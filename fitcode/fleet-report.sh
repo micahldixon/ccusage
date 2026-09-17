@@ -12,12 +12,12 @@
 #      file are read in place. For a folder with one, we read APFS clones (`cp -c`: instant,
 #      no extra disk) of its usable databases and their -wal files from a temp folder, and
 #      say how many we skipped. Symlinks do not work: upstream's file walk ignores them.
-#   3. jcode: ccusage has no jcode reader, so fitcode/jcode-to-pi.py rewrites its sessions in
-#      pi's log format into the temp folder, and a temporary --config names that folder as
-#      the pi store "jcode". ccusage reads such stores in its all-agents daily, weekly,
-#      monthly and session reports, as a table or --json. Any other report, a --config
-#      of the user's, a config file ccusage would find by itself (our --config would hide
-#      it), or a conversion failure prints the plain report and says why on stderr.
+#   3. jcode and dsh: ccusage has no reader for either, so jcode-to-pi.py / dsh-to-pi.py
+#      rewrite sessions in pi's log format into the temp folder, and a temporary --config
+#      names those folders as pi stores "jcode" and "dsh". ccusage reads such stores in
+#      its all-agents daily, weekly, monthly and session reports. Any other report, a
+#      --config of the user's, a config file ccusage would find by itself, or a conversion
+#      failure prints the plain report and says why on stderr.
 #   4. --fleet (anywhere in the arguments) adds the other Mac's report, run over ssh at the
 #      same time as this Mac's. It refuses when that Mac is unreachable, is this Mac, is on
 #      another commit, or when either checkout has uncommitted changes to fitcode/ scripts,
@@ -240,12 +240,14 @@ if [[ -z "$ag" ]]; then
   [[ -n "$ag" ]] || ag="$tmp/none"
 fi
 jcode="$tmp/jcode"
+dsh="$tmp/dsh"
 
 if [[ -n "${FLEET_REPORT_DRY:-}" ]]; then
   echo "CLAUDE_CONFIG_DIR=$claude"
   echo "ANTIGRAVITY_DATA_DIR=$ag"
   printf 'antigravity db %s\n' "${included[@]+"${included[@]}"}"
   echo "JCODE_DIR=$jcode"
+  echo "DSH_DIR=$dsh"
   exit 0
 fi
 
@@ -287,35 +289,45 @@ config_files() {  # the files ccusage reads settings from when no --config is gi
   done
 }
 
-# Why jcode stays out of this report. "-": this Mac has no jcode usage, so say nothing.
-why=""
 case "$kind" in daily|weekly|monthly|session) all_agents=1 ;; *) all_agents=0 ;; esac
 if ! python3 "$repo/fitcode/jcode-to-pi.py" --out "$jcode" 2>"$tmp/err"; then
-  why="its sessions could not be converted: $(last_error jcode-to-pi.py)"
+  echo "fleet-report: jcode not included (its sessions could not be converted: $(last_error jcode-to-pi.py))" >&2
 else
   cat "$tmp/err" >&2
-  if [[ ! -d "$jcode" ]]; then
-    why="-"
-  elif (( ! all_agents )); then
-    why="only the all-agents daily, weekly, monthly and session reports take it, not '$kind'"
-  elif (( config_given )); then
-    why="--config was given, and jcode needs a --config of its own"
-  elif [[ "$(search_hash)" != "$config_search_hash" ]]; then
-    why="ccusage's config file search in $config_rs changed; re-check config_files in fitcode/fleet-report.sh and update config_search_hash"
-  else
-    while IFS= read -r f; do
-      [[ ! -e "$f" ]] || { why="ccusage config file $f exists, and jcode's --config would hide it"; break; }
-    done < <(config_files)
-  fi
+fi
+if ! python3 "$repo/fitcode/dsh-to-pi.py" --out "$dsh" 2>"$tmp/err"; then
+  echo "fleet-report: dsh not included (its sessions could not be converted: $(last_error dsh-to-pi.py))" >&2
+else
+  cat "$tmp/err" >&2
+fi
+why=""
+if (( ! all_agents )); then
+  why="only the all-agents daily, weekly, monthly and session reports take named stores, not '$kind'"
+elif (( config_given )); then
+  why="--config was given, and named stores need a --config of their own"
+elif [[ "$(search_hash)" != "$config_search_hash" ]]; then
+  why="ccusage's config file search in $config_rs changed; re-check config_files in fitcode/fleet-report.sh and update config_search_hash"
+else
+  while IFS= read -r f; do
+    [[ ! -e "$f" ]] || { why="ccusage config file $f exists, and a --config would hide it"; break; }
+  done < <(config_files)
 fi
 if [[ -n "$why" ]]; then
-  [[ "$why" == - ]] || echo "fleet-report: jcode not included ($why)" >&2
+  echo "fleet-report: jcode not included ($why)" >&2
   run ${args[@]+"${args[@]}"}
   exit
 fi
-
-python3 -c 'import json, sys; json.dump({"pi": {"stores": [{"name": "jcode", "path": sys.argv[1]}]}}, sys.stdout)' \
-  "$jcode" >"$tmp/config.json"
+python3 -c 'import json, os, sys
+stores=[]
+for name, path in (("jcode", sys.argv[1]), ("dsh", sys.argv[2])):
+    if os.path.isdir(path) and os.listdir(path):
+        stores.append({"name": name, "path": path})
+json.dump({"pi": {"stores": stores}}, sys.stdout)
+' "$jcode" "$dsh" >"$tmp/config.json"
+if ! python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("pi",{}).get("stores") else 1)' "$tmp/config.json"; then
+  run ${args[@]+"${args[@]}"}
+  exit
+fi
 status=0
 run ${args[@]+"${args[@]}"} --config "$tmp/config.json" 2>"$tmp/err" || status=$?
 # A reader that stops early (`| head`) ends ccusage with SIGPIPE or a "Broken pipe" error.

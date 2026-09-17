@@ -2,10 +2,10 @@
 
 Not blocking use of the Dashboard. File these before calling the reporting surface done.
 
-- [ ] **dsh / DeepSeek Harness reader.** Sessions in `~/.dsh/sessions` (`*.jsonl.zstd`) carry `inputTokens` / `outputTokens` / `cacheReadTokens`. Same fitcode-converter pattern as jcode. Not in ccusage today.
+- [x] **dsh / DeepSeek Harness reader.** `dsh-to-pi.py` + named store `dsh` in `fleet-report.sh` (2026-09-17).
 - [ ] **Still no bill:** ChatGPT Work mode, agy (no usage transcripts), forge-agent (no data). super.engineering is a host, not a bill — do not double-count.
 - [ ] **Richer Master columns (optional):** tokens vs cache, Cursor included vs on-demand, IDE vs headless, list price vs charged, session id.
-- [ ] **Push** `0ca8d03f` and the dashboard commit so the MacBook can `--fleet` on the same SHA.
+- [x] **Push** dashboard commits; Mini and MacBook both at `943278d4` then the dsh follow-up SHA.
 - [ ] **Upstream pull** if `check-fence.sh` exits 2 (original repo moved again). Always pull before new fitcode work.
 - [ ] **Keep/cut calls** on Dashboard are a heuristic (tiny all-time + tiny this month → cut candidate). Not proof you should cancel.
 

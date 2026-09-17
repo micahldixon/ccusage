@@ -182,7 +182,7 @@ for a; do case "$a" in daily|weekly|monthly) kind="$a"; break ;; esac; done
 cat "$HOME/remote-$kind.json"
 EOF
 chmod +x "$t/fake/ccusage" "$t/fake/ssh" "$t/sshbin/ssh" "$t/rbin/hostname" "$t/repo/fitcode/fleet-report.sh"
-cp "$here/merge-reports.py" "$here/jcode-to-pi.py" "$t/repo/fitcode/"
+cp "$here/merge-reports.py" "$here/jcode-to-pi.py" "$here/dsh-to-pi.py" "$t/repo/fitcode/"
 repo_config_rs="$t/repo/rust/crates/ccusage-config/src/config.rs"
 cp "$config_rs" "$repo_config_rs"
 echo "upstream code" >"$t/repo/rust/README"

@@ -39,7 +39,7 @@ needed) and fixes these gaps on our machines:
   variable.
 - **One empty Antigravity database no longer crashes the whole report.** Unusable files are
   skipped and counted in a warning.
-- **jcode is counted.** ccusage has no jcode reader, so `jcode-to-pi.py` copies jcode's usage
+- **jcode and dsh are counted.** ccusage has no reader for either, so `jcode-to-pi.py` / `dsh-to-pi.py` copy their usage
   records into pi's log format and ccusage prices them like pi sessions. They show up as
   `[jcode] <model>` rows, and as agent `jcode` in `--json` output. The all-agents daily,
   weekly, monthly and session reports include jcode, also with `--by-agent` or `--sections`.
@@ -60,6 +60,7 @@ Fleet coverage (checked 2026-09-16 on both Macs; jcode added 2026-09-17):
 | pi, grok | Yes |
 | agy (gemini) | Supported, but agy keeps no transcripts with usage |
 | jcode | Yes (converted from `~/.jcode/sessions` and priced by ccusage) |
+| dsh (DeepSeek Harness) | Yes (converted from `~/.dsh/sessions` and priced by ccusage) |
 | Cursor (agents, IDE, cursor-agent) | Yes, from Cursor's account usage API (not local files). Charged dollars are `chargedCents/100`. |
 | ChatGPT.app Work mode | No: no token usage stored locally |
 | forge-agent | No data found on either Mac |
@@ -119,4 +120,6 @@ git remote set-url --push upstream DISABLED
 - `test-cursor-usage.sh` — proves cents-to-dollars, dates, and that emails stay out of the JSON.
 - `export-agent-spend-sheet.py` — turns that JSON into a Google Sheets payload.
 - `test-export-agent-spend-sheet.sh` — proves the payload shape and a deliberate breakage.
+- `dsh-to-pi.py` — copies DeepSeek Harness usage into pi's log format for the report.
+- `test-dsh-to-pi.sh` — proves chunks are ignored and a missing dsh folder is harmless.
 - `specs/` — our design notes for work built on ccusage.
