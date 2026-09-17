@@ -1,6 +1,6 @@
 {
 	"name": "ccusage-monorepo",
-	"version": "20.0.21",
+	"version": "20.0.22",
 	"private": true,
 	"workspaces": [
 		"apps/*",
@@ -12,5 +12,5 @@
 		"preinstall": "npx only-allow pnpm"
 	},
 	"dependencies": {},
-	"packageManager": "pnpm@11.27.0"
+	"packageManager": "pnpm@12.4.1"
 }
