@@ -1,3 +1,5 @@
+⚠️ HOLD OFF RUNNING PROMPT: already carried out on 2026-09-17 (commits `058c3124`, `80db30ff`); see `2026-09-17-jcode-reader-and-fleet-total.md` for results and follow-ups.
+
 # MAIN — run this session here
 
 Owning workspace: the ccusage fork on the **Mac mini** (`hostname` must print `mac-mini.local`).

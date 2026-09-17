@@ -101,10 +101,50 @@ All work stays in `fitcode/`; run `fitcode/check-fence.sh` before every push.
 
 ## Phase 4 — verify and ship
 
-- [ ] `bash fitcode/test-fleet-report.sh`, `bash fitcode/test-check-fence.sh` (and any new test)
-      pass on both Macs.
-- [ ] Real runs on both Macs list `jcode` where used; jcode figures reconcile with the hand
-      count; fleet total equals the two per-machine totals for the same range.
+- [x] `bash fitcode/test-fleet-report.sh`, `bash fitcode/test-check-fence.sh` (and any new test)
+      pass on both Macs. (All five self-tests pass on both Macs at `80db30ff`.)
+- [x] Real runs on both Macs list `jcode` where used; jcode figures reconcile with the hand
+      count; fleet total equals the two per-machine totals for the same range. (See Results.)
 - [x] `fitcode/README.md` coverage table and usage updated.
-- [ ] Commit, `fitcode/check-fence.sh`, push; MacBook pulled to the same commit.
-- [ ] Plain-English before/after report to Micah.
+- [x] Commit, `fitcode/check-fence.sh`, push; MacBook pulled to the same commit.
+      (`058c3124` feature, `80db30ff` plan; pushed and pulled by the lead session because
+      background workers cannot run `git push`.)
+- [x] Plain-English before/after report to Micah (session close, 2026-09-17).
+
+## Results (2026-09-17, `fitcode/fleet-report.sh monthly --json --offline`)
+
+| Range | Mac | With jcode | Without jcode | jcode |
+|---|---|---|---|---|
+| Sept 1–16 | mini | $14,786.64 | $13,670.44 | $1,116.20 (7.55%) |
+| Sept 1–16 | MacBook | $144.84 | $144.84 | $0 |
+| Sept 1–16 | **fleet** | **$14,931.48** | | |
+| All time to Sept 16 | mini | $34,497.87 | $33,119.73 | $1,378.14 |
+| All time to Sept 16 | MacBook | $20,088.62 | $20,058.18 | $30.44 |
+| All time to Sept 16 | **fleet** | **$54,586.49** | | |
+
+- Each fleet total equals mini + MacBook to the cent and the token; one `--fleet` run takes
+  about 49 s.
+- jcode reconciles with the hand counts: mini Sept 1–16 $1,116.20 / 1,287,409,220 tokens;
+  MacBook all-time `[jcode] claude-opus-5` matches field for field (44,893,308 tokens).
+- Before this work (baseline at `00f02887`, live pricing, no `--until`): mini Sept $13,653.94,
+  MacBook Sept $144.84, mini all time $33,105.04, MacBook all time $20,053.64. The small
+  non-jcode differences come from late Sept 16 usage and from live versus built-in pricing.
+
+## Watchlist (not done; none blocks use)
+
+- Optional: propose a proper jcode reader to upstream `ccusage/ccusage` (public; needs Micah's
+  OK and an issue in his voice). The format evidence is in this plan's Phase 0 notes.
+- jcode is skipped, with a warning, whenever a ccusage config file exists or `--config` is
+  given. Adding a config file later means revisiting this rule.
+- An upstream change to ccusage's config search trips the hash guard in `fleet-report.sh`;
+  jcode is then skipped with a warning until someone re-checks and updates the hash.
+- Two reports started at the same moment on one Mac can hit an Antigravity database lock
+  (ccusage behaviour); `--fleet` uses two Macs and is unaffected.
+- `--order desc` merged output comes out ascending when each Mac has at most one row.
+- On the jcode route, ccusage's warnings print after the report instead of live.
+- After an early `--fleet` exit, the MacBook's report finishes on its own and is discarded.
+- `--fleet` runs only from the mini: the MacBook has no ssh route to the mini.
+- The fleet table is 126 columns wide; the temp folder is still named `fleet-report-ag.*`.
+- Optional filter for jcode debug/canary sessions ($190.07 of Sept jcode on the mini).
+- Pre-existing, out of scope: some Antigravity models (`model_placeholder_m301`, `m322`) have
+  no price in ccusage's table (found by the session Scribe).
