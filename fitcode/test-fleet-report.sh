@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Self-test for fleet-report.sh's selection logic (no ccusage build needed). Builds a fake
 # home with the traps we hit for real, and fails if the script stops handling any of them.
+# FLEET_REPORT_SCRIPT=path tests another copy of the report (used to break it on purpose).
 set -uo pipefail
 
-script="$(cd "$(dirname "$0")" && pwd)/fleet-report.sh"
+script="${FLEET_REPORT_SCRIPT:-$(cd "$(dirname "$0")" && pwd)/fleet-report.sh}"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 home="$tmp/home"
@@ -40,6 +41,7 @@ check no  "empty.db"                        "empty Antigravity database is skipp
 check no  "other.db"                        "database without gen_metadata is skipped"
 check no  "$home/.gemini/antigravity/conversations" "folder with no usable database is not read"
 check yes "skipped 2 unreadable"            "skipped databases are reported"
+check yes "JCODE_DIR=${TMPDIR:-/tmp}/fleet-report-ag." "jcode is converted into the temp folder"
 
 # A folder mixing usable and broken databases is read from clones, never in place.
 sqlite3 "$home/.gemini/antigravity/conversations/desk.db" \
@@ -49,7 +51,7 @@ out="$(env -u CLAUDE_CONFIG_DIR -u ANTIGRAVITY_DATA_DIR HOME="$home" FLEET_REPOR
 check yes "antigravity db $home/.gemini/antigravity/conversations/desk.db" \
                                             "usable database in a mixed folder is kept"
 check no  ",$home/.gemini/antigravity/conversations" "mixed folder is not read in place"
-check yes "fleet-report-ag."                "mixed folder is read from a temp copy"
+check yes "ANTIGRAVITY_DATA_DIR=${TMPDIR:-/tmp}/fleet-report-ag." "mixed folder is read from a temp copy"
 
 # Claude.app Cowork sessions each carry their own transcript folder.
 cowork="$home/Library/Application Support/Claude/local-agent-mode-sessions/org/acct/local_abc/.claude"
