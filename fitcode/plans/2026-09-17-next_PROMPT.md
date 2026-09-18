@@ -1,3 +1,5 @@
+⚠️ HOLD OFF RUNNING PROMPT: this prompt's job (upstream pull + context-overhead brainstorm) was completed on 2026-09-17; the next session runs `fitcode/plans/2026-09-18-next_PROMPT.md` instead.
+
 # MAIN — run this session here
 
 Owning workspace: the ccusage fork on the **Mac mini**.
