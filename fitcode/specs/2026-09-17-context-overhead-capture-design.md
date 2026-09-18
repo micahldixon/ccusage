@@ -172,9 +172,11 @@ Live smoke, once, on the mini: run the probe, compare the reported total with an
 
 ## Out of Scope
 
-- Other CLIs. **Next spike:** `copilot -p "/context"` and `agy -p "/context"` headless; each
-  that works becomes a probe row. Kilo and Hermes are not installed on the fleet; Cursor is
-  unresolved.
+- Other CLIs. **Next spikes:** (1) `copilot -p "/context"` headless; if it works, Copilot is the
+  second probe row. (2) Antigravity: Micah runs `/context` inside Antigravity.app himself while
+  its Gemini fast mode is free, and saves the printed output; that capture becomes the fixture
+  for an Antigravity parser fed through `--from`, with no headless path needed and no reason to
+  settle what `agy` is. Kilo and Hermes are not installed on the fleet; Cursor is unresolved.
 - `derived` numbers from the `prompt_snapshot` attachment (exact per-tool counts). Documented
   as the v2 path; needs a tokenizer decision.
 - A per-session "first-turn input tokens" metric from existing logs (a different number: it
