@@ -38,10 +38,15 @@ unless marked *reported* (from vendor docs, cited in the recon report).
 4. **Of 21 CLIs surveyed, five have an itemized `/context`-style command** (*reported*): Claude
    Code (verified), GitHub Copilot CLI, Google Antigravity CLI, Kilo Code CLI, Hermes Agent.
    Cursor CLI is unresolved (docs describe a breakdown tray; unclear if it reaches the terminal).
-   The rest (codex, gemini/agy, opencode, amp, goose, pi, grok, qwen, kimi, droid, codebuff,
-   openclaw, zcode, jcode) expose only aggregate token counters. On this fleet only `claude` and
-   `copilot` of the five are installed; whether `copilot -p "/context"` works headlessly is
-   untested.
+   The rest (codex, gemini, opencode, amp, goose, pi, grok, qwen, kimi, droid, codebuff,
+   openclaw, zcode, jcode) expose only aggregate token counters. Correction found by the Scribe:
+   `agy` (1.2.5, a Go binary at `~/.local/bin/agy` that wraps Gemini models, with `--output-format
+   json` and `mcp`/`plugin` subcommands) is **not** Gemini CLI, which is installed separately as
+   `gemini` 0.57.0; the survey's gemini row only ever examined `gemini`. Whether `agy` is Google's
+   Antigravity CLI is unconfirmed (its `--help` shows no context command, but a session slash
+   command would not appear there). On this fleet `claude` and `copilot` are installed for sure,
+   `agy` is a candidate; whether `copilot -p "/context"` or `agy -p "/context"` works headlessly
+   is untested.
 5. **The prototype explorer** (`~/dev-tools/agents-mgmt/context-overhead-explorer.html`, 431
    lines, no library, no generator) is driven by one hardcoded `DATA` tree at line 125: 6
    top-level categories, 645 leaves, 218,124 tokens, every node `measured:true`. It already
@@ -167,8 +172,8 @@ Live smoke, once, on the mini: run the probe, compare the reported total with an
 
 ## Out of Scope
 
-- Other CLIs. **Next spike:** `copilot -p "/context"` headless; if it works, Copilot is the
-  second probe row. Antigravity, Kilo, Hermes are not installed on the fleet; Cursor is
+- Other CLIs. **Next spike:** `copilot -p "/context"` and `agy -p "/context"` headless; each
+  that works becomes a probe row. Kilo and Hermes are not installed on the fleet; Cursor is
   unresolved.
 - `derived` numbers from the `prompt_snapshot` attachment (exact per-tool counts). Documented
   as the v2 path; needs a tokenizer decision.
@@ -189,6 +194,9 @@ Live smoke, once, on the mini: run the probe, compare the reported total with an
 ## Watchlist (not blocking)
 
 - Cursor CLI vs IDE breakdown tray; Hermes category list; amp, codebuff, zcode unverified.
+- `fitcode/README.md` labels the fleet row "agy (gemini)"; `agy` is not Gemini CLI. Which ccusage
+  adapter (if any) counts agy's sessions was measured by an earlier session and is not re-checked
+  here; fix the label only after re-checking.
 - `/context` totals drift with model choice (`--model` changes the window and the report).
 - Recon reports for this design live only in the session scratchpad; the facts that matter are
   restated above and in the Scribe ledger for session 2026-09-17-79bd7d64.
