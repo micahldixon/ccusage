@@ -1,9 +1,9 @@
 # Cold-Start Context Overhead Capture — Design
 
-**Status: DRAFT awaiting Micah's review (2026-09-17).** Brainstorm outcome for
-`2026-09-16-context-overhead-explorer-ideation.md`. No code has been written. Two decisions
-below are marked **GATE** because the handoff prompt reserves them for Micah; the draft
-proceeds on the recommended answer and stops there.
+**Status: APPROVED by Micah on 2026-09-17 (option A).** Brainstorm outcome for
+`2026-09-16-context-overhead-explorer-ideation.md`. No code has been written yet. The two
+**GATE** decisions below were answered "no" with the approval: no new top-level `ccusage`
+command, no leaked-prompt corpus.
 
 ## Context
 
@@ -98,7 +98,7 @@ convention, with provenance carried on every node and a table-driven seam for ad
   sync this tool otherwise lacks. Five CLIs already self-report; the corpus only earns its place
   if Micah wants cross-product comparison of tools not on this fleet.
 
-### Options considered
+### Options considered (A chosen)
 
 | | Will it actually work? | Who maintains this? | Does it work on every agent? |
 |---|---|---|---|
