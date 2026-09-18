@@ -1,6 +1,6 @@
 # Cold-Start Context Overhead — Ideation
 
-**Status: ideation only. Not designed, not scheduled, not built.** This scopes the problem and
+**Status: brainstormed 2026-09-17 → see `2026-09-17-context-overhead-capture-design.md` (draft awaiting review). Not built.** This scopes the problem and
 the open questions a real brainstorming session (`superpowers:brainstorming`) needs to resolve
 before a `fitcode/specs/*-design.md` gets written.
 
